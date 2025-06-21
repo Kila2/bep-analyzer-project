@@ -1,6 +1,6 @@
 {
   "name": "bep-analyzer",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "A tool to analyze and pretty-print Bazel BEP files, with both static and real-time modes.",
   "main": "dist/index.js",
   "bin": {

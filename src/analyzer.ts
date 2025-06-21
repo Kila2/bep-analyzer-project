@@ -294,11 +294,25 @@ export class StaticBepAnalyzer {
             if (metrics.actionSummary.actionCacheStatistics) {
                 const stats = metrics.actionSummary.actionCacheStatistics;
                 const misses = stats.missDetails.reduce((s, d) => s + (Number(d.count) || 0), 0);
-                const hits = Number(metrics.artifactMetrics?.outputArtifactsFromActionCache?.count || 0);
+                const hits = Number(metrics.artifactMetrics?.outputArtifactsFromActionCache?.count || stats.hits || 0);
                 const totalLookups = hits + misses;
                 const hitRate = totalLookups > 0 ? ((hits / totalLookups) * 100).toFixed(2) : '0.00';
                 const hitRateColor = hits > 0 ? chalk.green : chalk.yellow;
                 perfTable.push(['Action Cache', `${hitRateColor(hitRate + '%')} hit (${formatNumber(hits)} hits / ${formatNumber(misses)} misses)`]);
+                
+                if (stats.missDetails && stats.missDetails.length > 0) {
+                    const missRows = stats.missDetails
+                        .filter(d => Number(d.count) > 0)
+                        .sort((a, b) => Number(b.count) - Number(a.count));
+                    
+                    if (missRows.length > 0) {
+                        perfTable.push([{ colSpan: 2, content: chalk.white('  Cache Miss Breakdown:') }]);
+                        missRows.forEach(detail => {
+                            const reason = detail.reason.replace(/_/g, ' ').toLowerCase().replace(/(?:^|\s)\S/g, a => a.toUpperCase());
+                            perfTable.push([`    - ${reason}`, chalk.yellow(formatNumber(detail.count))]);
+                        });
+                    }
+                }
             }
             if (metrics.memoryMetrics) {
                 const memRows: any[] = [];
@@ -308,14 +322,22 @@ export class StaticBepAnalyzer {
                 if(metrics.memoryMetrics.usedHeapSizePostBuild) {
                     memRows.push(['Used Heap (Post Build)', chalk.magenta(formatBytes(metrics.memoryMetrics.usedHeapSizePostBuild))]);
                 }
-                if (metrics.memoryMetrics.garbageMetrics && metrics.memoryMetrics.garbageMetrics.length > 0 && memRows.length === 0) {
-                    const totalGarbage = metrics.memoryMetrics.garbageMetrics.reduce((sum, metric) => sum + Number(metric.garbageCollected), 0);
-                    memRows.push(['Total Garbage Collected', chalk.magenta(formatBytes(totalGarbage))]);
-                }
-                
                 if (memRows.length > 0) {
-                    perfTable.push([{ colSpan: 2, content: chalk.bold.white('Memory') }]);
+                    perfTable.push([{ colSpan: 2, content: chalk.bold.white('Memory Usage') }]);
                     perfTable.push(...memRows);
+                }
+
+                if (metrics.memoryMetrics.garbageMetrics && metrics.memoryMetrics.garbageMetrics.length > 0) {
+                     const gcRows: any[] = [];
+                     metrics.memoryMetrics.garbageMetrics
+                        .sort((a,b) => Number(b.garbageCollected) - Number(a.garbageCollected))
+                        .forEach(metric => {
+                            gcRows.push([`  ${metric.type}`, chalk.magenta(formatBytes(metric.garbageCollected))]);
+                        });
+                    if (gcRows.length > 0) {
+                        perfTable.push([{ colSpan: 2, content: chalk.bold.white('Garbage Collection by Type') }]);
+                        perfTable.push(...gcRows);
+                    }
                 }
             }
             console.log(perfTable.toString());
