@@ -456,6 +456,13 @@ export class StaticBepAnalyzer {
                     actions.forEach((action, index) => {
                         const duration = formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || '0', 10));
                         console.log(`  [${index + 1}] Type: ${chalk.blue(action.mnemonic)} | Duration: ${chalk.yellow(duration)}`);
+
+                        if (action.primaryOutput?.uri) {
+                            const outputPath = action.primaryOutput.uri.replace('file://', '');
+                            console.log(chalk.yellow('    Primary Output:'));
+                            console.log(chalk.gray(`      ${outputPath}`));
+                        }
+
                         if (action.argv && action.argv.length > 0) {
                             const command = action.argv.join(' ');
                             const displayedCommand = this.fullCommandLine ? command : `${command.substring(0, 200)}...`;
