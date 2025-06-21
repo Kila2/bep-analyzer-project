@@ -32,7 +32,8 @@ interface ProgressInfo {
 }
 
 function parseProgress(text: string): ProgressInfo {
-  const lines = stripAnsi(text)
+  const strippedText = stripAnsi(text);
+  const lines = strippedText
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
@@ -42,32 +43,34 @@ function parseProgress(text: string): ProgressInfo {
   const runningActions: { name: string; duration: string }[] = [];
   const logs: string[] = [];
 
-  const progressMatch = text.match(/\(\[([\d,]+)\s*\/\s*([\d,]+)\]\)/);
+  const progressMatch = strippedText.match(/\(\[([\d,]+)\s*\/\s*([\d,]+)\]\)/);
   if (progressMatch) {
     completed = parseInt(progressMatch[1].replace(/,/g, ""), 10);
     total = parseInt(progressMatch[2].replace(/,/g, ""), 10);
   }
 
   for (const line of lines) {
-    const actionMatch = line.match(
-      /^(Compiling|Linking|Generating|Testing|Action)\s+(.+?);\s*(\d+s)\s+\w+$/,
-    );
-    if (actionMatch) {
-      runningActions.push({
-        name: `${actionMatch[1]} ${actionMatch[2]}`,
-        duration: actionMatch[3],
-      });
+    const actionMatch = line.match(/^(\s*\w+\s+.+?);\s+(\d+s)/i);
+    if (actionMatch && !line.startsWith("From")) {
+      const name = actionMatch[1].trim();
+      const duration = actionMatch[2];
+      runningActions.push({ name, duration });
       continue;
     }
 
     if (
-      line.startsWith("INFO:") ||
-      line.startsWith("warning:") ||
-      line.startsWith("ERROR:")
+      /^(info|warning|error|from|in file included from)/i.test(line) ||
+      /^\d+\s+warning(s)?\s+generated\./.test(line)
     ) {
+      logs.push(line);
+    } else if (line.includes("warning:") || line.includes("error:")) {
       logs.push(line);
     }
   }
+
+  runningActions.sort(
+    (a, b) => parseInt(b.duration, 10) - parseInt(a.duration, 10),
+  );
 
   return { completed, total, runningActions, logs };
 }
@@ -79,8 +82,11 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   private timer: NodeJS.Timeout | null = null;
   private readonly spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   private spinnerIndex = 0;
-  private lastEventDescription = "Waiting for build to start...";
   private recentLogs: string[] = [];
+
+  constructor(actionDetails: "none" | "failed" | "all" = "failed") {
+    super(actionDetails);
+  }
 
   public tailFile(filePath: string): Promise<void> {
     if (!fs.existsSync(filePath)) {
@@ -120,6 +126,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   }
 
   protected processEvent(event: BepEvent): void {
+    super.processEvent(event);
     const id = event.id;
     const data = event.payload || event;
 
@@ -129,29 +136,49 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           data.started?.startTimeMillis || Date.now().toString();
         this.startTimer(startTime);
       }
-      this.lastEventDescription = `Build started. Command: ${chalk.gray(data.started?.command)}`;
     } else if (id.actionCompleted) {
-      this.lastEventDescription = `Action Finished: ${chalk.blue(data.completed?.mnemonic)} ${id.actionCompleted.label}`;
-    } else if (id.testSummary) {
-      this.lastEventDescription = `Test Summary: ${chalk.magenta(id.testSummary.label)}`;
+      const lastAction = this.actions[this.actions.length - 1];
+      if (lastAction && !lastAction.success && this.actionDetails !== "none") {
+        const errorHeader = chalk.red.bold(
+          `❌ FAILED: ${lastAction.mnemonic} ${lastAction.label}`,
+        );
+        this.recentLogs.push(errorHeader);
+        if (lastAction.stderrContent) {
+          const stderrLines = lastAction.stderrContent
+            .trim()
+            .split("\n")
+            .slice(0, 3);
+          stderrLines.forEach((line) =>
+            this.recentLogs.push(chalk.red(`  ${line}`)),
+          );
+          if (lastAction.stderrContent.trim().split("\n").length > 3) {
+            this.recentLogs.push(
+              chalk.red("  ... (Full stderr in final report)"),
+            );
+          }
+        }
+        while (this.recentLogs.length > 5) this.recentLogs.shift();
+      }
     } else if (id.problem) {
       const problemMsg = `Problem: ${data.problem?.message.split("\n")[0]}`;
-      this.lastEventDescription = chalk.red(problemMsg);
-      this.recentLogs.push(problemMsg);
+      this.recentLogs.push(chalk.red(problemMsg));
       if (this.recentLogs.length > 5) this.recentLogs.shift();
     } else if (id.progress) {
       this.progressText = data.progress?.stderr || data.progress?.stdout || "";
       const parsed = parseProgress(this.progressText);
-      if (parsed.logs.length > 0) {
-        this.recentLogs.push(...parsed.logs);
-        while (this.recentLogs.length > 5) this.recentLogs.shift();
-      }
+      parsed.logs.forEach((log) => {
+        if (
+          !this.recentLogs.some(
+            (existing) => stripAnsi(existing) === stripAnsi(log),
+          )
+        ) {
+          this.recentLogs.push(log);
+        }
+      });
+      while (this.recentLogs.length > 5) this.recentLogs.shift();
     } else if (id.buildFinished || id.finished) {
       this.isFinished = true;
-      this.lastEventDescription = chalk.bold.green("Build finished.");
     }
-
-    super.processEvent(event);
   }
 
   private startTimer(startTimeMillis: string) {
@@ -209,7 +236,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
         const bar = renderProgressBar(percent, 30);
         output.push(
           chalk.bold(
-            `Overall Progress: [${bar}] ${percent}% (${progressInfo.completed}/${progressInfo.total})`,
+            `Overall Progress: [${bar}] ${percent}% (${progressInfo.completed.toLocaleString()}/${progressInfo.total.toLocaleString()})`,
           ),
         );
       }
@@ -218,8 +245,13 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
         output.push("");
         output.push(chalk.bold.cyan("--- Running Actions ---"));
         const table = new Table({
-          colWidths: [80, 10],
-          style: { head: [], border: [] },
+          colWidths: [70, 10],
+          style: {
+            head: [],
+            border: [],
+            "padding-left": 0,
+            "padding-right": 0,
+          },
         });
         progressInfo.runningActions.slice(0, 5).forEach((action) => {
           table.push([chalk.gray(action.name), chalk.yellow(action.duration)]);
@@ -231,12 +263,23 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
         output.push("");
         output.push(chalk.bold.cyan("--- Recent Logs ---"));
         this.recentLogs.forEach((log) => {
-          if (log.toLowerCase().includes("warning")) {
-            output.push(chalk.yellow(log));
-          } else if (log.toLowerCase().includes("error")) {
-            output.push(chalk.red(log));
+          const cleanLog =
+            stripAnsi(log).length > 90
+              ? stripAnsi(log).substring(0, 87) + "..."
+              : stripAnsi(log);
+          if (
+            log.toLowerCase().includes("warning") ||
+            log.includes("warning:")
+          ) {
+            output.push(chalk.yellow(`  ${cleanLog}`));
+          } else if (
+            log.toLowerCase().includes("error") ||
+            log.includes("error:") ||
+            log.includes("FAILED")
+          ) {
+            output.push(chalk.red(`  ${cleanLog}`));
           } else {
-            output.push(chalk.dim(log));
+            output.push(chalk.dim(`  ${cleanLog}`));
           }
         });
       }

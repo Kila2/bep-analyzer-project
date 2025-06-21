@@ -10,25 +10,27 @@ export interface BepEvent {
     problem?: any;
     workspaceStatus?: any;
     configuration?: { id: string };
-    buildMetrics?: any; // For build performance metrics
+    buildMetrics?: any;
+    buildToolLogs?: any;
 
-    // Keys found in hierarchical/older BEP formats (like your example)
+    // Keys found in hierarchical/older BEP formats
     started?: any; 
     finished?: any;
   };
   children: any[];
-  // payload is optional to support different BEP formats
   payload?: any; 
 
   // Data fields can be at the top level or inside a payload
   started?: BuildStarted;
   finished?: BuildFinished;
-  completed?: any; // For actionCompleted, targetCompleted
+  completed?: any;
   summary?: TestSummary;
   problem?: Problem;
   workspaceStatus?: WorkspaceStatus;
   configuration?: Configuration;
   buildMetrics?: BuildMetrics;
+  buildToolLogs?: BuildToolLogs;
+  action?: Action; 
 }
 
 export interface Action {
@@ -36,14 +38,19 @@ export interface Action {
   mnemonic: string;
   label?: string;
   primaryOutput: { uri: string };
-  // Add argv for potentially showing compile commands on failure
   argv?: string[]; 
+  commandLine?: string[];
+  stderr?: { uri: string };
+  stderrContent?: string; 
   actionResult: {
     executionInfo: {
       startTimeMillis: string;
       wallTimeMillis: string;
     }
   }
+  type?: string;
+  startTime?: string;
+  endTime?: string;
 }
 
 export interface TestSummary {
@@ -79,11 +86,57 @@ export interface Configuration {
     makeVariable: { [key: string]: string };
 }
 
-// --- New Types for BuildMetrics Event ---
+export interface BuildToolLog {
+    name: string;
+    contents?: string;
+    uri?: string;
+}
+
+export interface BuildToolLogs {
+    log: BuildToolLog[];
+}
+
+// --- Comprehensive BuildMetrics types based on build_event_stream.proto ---
 
 export interface ActionMetric {
     mnemonic: string;
     actionsExecuted: string;
+    actionsCreated?: string;
+}
+
+export interface RunnerCount {
+    name: string;
+    count: number;
+    execKind?: string;
+}
+
+export interface ActionCacheStatistics {
+    misses: number;
+    missDetails: { reason: string; count: number }[];
+    hits?: number; 
+}
+
+export interface ActionSummary {
+    actionsExecuted: string;
+    actionsCreated?: string;
+    actionData: ActionMetric[];
+    runnerCount?: RunnerCount[];
+    actionCacheStatistics?: ActionCacheStatistics;
+}
+
+export interface MemoryMetrics {
+    usedHeapSizePostBuild?: string;
+    peakPostGcHeapSize?: string;
+    garbageMetrics?: { type: string; garbageCollected: string }[];
+}
+
+export interface TargetMetrics {
+    targetsLoaded?: string;
+    targetsConfigured: string;
+}
+
+export interface PackageMetrics {
+    packagesLoaded: string;
 }
 
 export interface TimingMetrics {
@@ -93,17 +146,72 @@ export interface TimingMetrics {
     executionPhaseTimeInMs: string;
 }
 
+export interface FilesMetric {
+    sizeInBytes: string;
+    count: number;
+}
+
+export interface ArtifactMetrics {
+    sourceArtifactsRead: FilesMetric;
+    outputArtifactsSeen: FilesMetric;
+    outputArtifactsFromActionCache?: FilesMetric;
+    topLevelArtifacts?: FilesMetric;
+}
+
+export interface EvaluationStat {
+    skyfunctionName: string;
+    count: string;
+}
+
+export interface BuildGraphMetrics {
+    actionLookupValueCount: number;
+    actionCount: number;
+    outputArtifactCount: number;
+    postInvocationSkyframeNodeCount?: number;
+    builtValues?: EvaluationStat[];
+}
+
+export interface WorkerStats {
+    workerMemoryInKb: number;
+}
+
+export interface WorkerMetrics {
+    mnemonic: string;
+    isMultiplex: boolean;
+    workerStats?: WorkerStats[];
+    actionsExecuted: string;
+}
+
+export interface WorkerPoolStats {
+    mnemonic: string;
+    createdCount: string;
+    destroyedCount: string;
+    evictedCount: string;
+    aliveCount: string;
+}
+
+export interface WorkerPoolMetrics {
+    workerPoolStats: WorkerPoolStats[];
+}
+
+export interface SystemNetworkStats {
+    bytesSent: string;
+    bytesRecv: string;
+}
+
+export interface NetworkMetrics {
+    systemNetworkStats?: SystemNetworkStats;
+}
+
 export interface BuildMetrics {
-    actionSummary: {
-        actionsExecuted: string;
-        actionData: ActionMetric[];
-    };
-    memoryMetrics: {
-        peakHeapSize: string;
-        // ... and other memory metrics
-    };
+    actionSummary: ActionSummary;
+    memoryMetrics: MemoryMetrics;
+    targetMetrics: TargetMetrics;
+    packageMetrics: PackageMetrics;
     timingMetrics: TimingMetrics;
-    targetMetrics: {
-        targetsConfigured: string;
-    };
+    artifactMetrics: ArtifactMetrics;
+    buildGraphMetrics: BuildGraphMetrics;
+    workerMetrics?: WorkerMetrics[];
+    workerPoolMetrics?: WorkerPoolMetrics;
+    networkMetrics?: NetworkMetrics;
 }

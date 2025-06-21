@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { BepEvent, Action, TestSummary, BuildFinished, BuildStarted, Problem, WorkspaceStatus, Configuration, BuildMetrics } from './types';
+import { BepEvent, Action, TestSummary, BuildFinished, BuildStarted, Problem, WorkspaceStatus, Configuration, BuildMetrics, BuildToolLogs } from './types';
 
 function formatDuration(ms: number): string {
     if (ms < 1000) {
@@ -21,10 +21,21 @@ function formatNumber(num: number | string): string {
     return Number(num).toLocaleString();
 }
 
+function formatBytes(bytes: number | string): string {
+    const num = Number(bytes);
+    if (num === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(num) / Math.log(k));
+    return parseFloat((num / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+
 export class StaticBepAnalyzer {
     protected buildStarted: BuildStarted | null = null;
     protected buildFinished: BuildFinished | null = null;
     protected buildMetrics: BuildMetrics | null = null;
+    protected buildToolLogs: BuildToolLogs | null = null;
     protected readonly actions: Action[] = [];
     protected readonly testSummaries: TestSummary[] = [];
     protected readonly problems: Problem[] = [];
@@ -32,6 +43,7 @@ export class StaticBepAnalyzer {
     protected workspaceStatus: WorkspaceStatus | null = null;
     protected readonly configurations: Map<string, Configuration> = new Map();
 
+    constructor(protected actionDetails: 'none' | 'failed' | 'all' = 'failed') {}
 
     public async analyze(filePath: string) {
         if (!fs.existsSync(filePath)) {
@@ -74,9 +86,46 @@ export class StaticBepAnalyzer {
         const eventType = Object.keys(id)[0];
         switch(eventType) {
             case 'actionCompleted':
-                if (data.completed) {
-                    const action = data.completed as Action;
+                const actionData = data.completed || data.action;
+                if (actionData) {
+                    const action = actionData as Action;
                     action.label = id.actionCompleted!.label;
+                    if (id.actionCompleted!.primaryOutput) {
+                        action.primaryOutput = { uri: `file://${id.actionCompleted!.primaryOutput}` };
+                    }
+
+                    if (!action.mnemonic && action.type) action.mnemonic = action.type;
+
+                    if (!action.actionResult && action.startTime && action.endTime) {
+                        try {
+                            const start = new Date(action.startTime).getTime();
+                            const end = new Date(action.endTime).getTime();
+                            action.actionResult = {
+                                executionInfo: {
+                                    startTimeMillis: String(start),
+                                    wallTimeMillis: String(end - start),
+                                }
+                            };
+                        } catch(e) {}
+                    }
+
+                    const shouldProcessDetails = 
+                        this.actionDetails === 'all' || 
+                        (this.actionDetails === 'failed' && !action.success);
+
+                    if (shouldProcessDetails) {
+                        const fullActionPayload = data.action || data.completed;
+                        action.argv = fullActionPayload.commandLine || fullActionPayload.argv;
+                        if (fullActionPayload.stderr?.uri) {
+                            try {
+                                const stderrPath = new URL(fullActionPayload.stderr.uri).pathname;
+                                action.stderrContent = fs.readFileSync(stderrPath, 'utf-8');
+                            } catch (e) {
+                                action.stderrContent = `[Error] Failed to read stderr.`;
+                            }
+                        }
+                    }
+
                     if (action.actionResult?.executionInfo?.wallTimeMillis) {
                         this.actions.push(action);
                     }
@@ -87,19 +136,15 @@ export class StaticBepAnalyzer {
                     const summary = data.summary as TestSummary;
                     summary.label = id.testSummary!.label;
                     const existingIndex = this.testSummaries.findIndex(s => s.label === summary.label);
-                    if (existingIndex > -1) {
-                        this.testSummaries[existingIndex] = summary;
-                    } else {
-                        this.testSummaries.push(summary);
-                    }
+                    if (existingIndex > -1) this.testSummaries[existingIndex] = summary;
+                    else this.testSummaries.push(summary);
                 }
                 break;
             case 'problem':
                 if (data.problem) this.problems.push(data.problem as Problem);
                 break;
             case 'targetCompleted':
-                const completedData = data.completed;
-                if (completedData && !completedData.success) {
+                if (data.completed && !data.completed.success) {
                     this.failedTargets.push({
                         label: id.targetCompleted!.label,
                         configId: id.targetCompleted!.configuration?.id
@@ -113,7 +158,10 @@ export class StaticBepAnalyzer {
                 if (data.configuration) this.configurations.set(id.configuration!.id, data.configuration);
                 break;
             case 'buildMetrics':
-                if (data.buildMetrics) this.buildMetrics = data.buildMetrics;
+                if (event.buildMetrics) this.buildMetrics = event.buildMetrics as BuildMetrics;
+                break;
+            case 'buildToolLogs':
+                if (event.buildToolLogs) this.buildToolLogs = event.buildToolLogs as BuildToolLogs;
                 break;
         }
     }
@@ -124,47 +172,120 @@ export class StaticBepAnalyzer {
             return;
         }
 
+        // --- Build Summary ---
         console.log(chalk.bold.cyan('\n--- Build Summary ---'));
         const success = this.buildFinished.overallSuccess;
         const status = success ? chalk.green('SUCCESS') : chalk.red('FAILURE');
         console.log(`Status: ${status}`);
-        
         const startTime = parseInt(this.buildStarted.startTimeMillis, 10);
         const finishTime = parseInt(this.buildFinished.finishTimeMillis, 10);
-        const duration = formatDuration(finishTime - startTime);
-        console.log(`Total Time: ${chalk.yellow(duration)}`);
-        console.log(`Command: ${chalk.gray(this.buildStarted.command)}`);
-
+        console.log(`Total Time: ${chalk.yellow(formatDuration(finishTime - startTime))}`);
         if (this.buildMetrics?.timingMetrics) {
             const metrics = this.buildMetrics.timingMetrics;
             console.log(`  - Analysis Phase: ${chalk.magenta(formatDuration(Number(metrics.analysisPhaseTimeInMs)))}`);
             console.log(`  - Execution Phase: ${chalk.magenta(formatDuration(Number(metrics.executionPhaseTimeInMs)))}`);
         }
+        console.log(`Command: ${chalk.gray(this.buildStarted.command)}`);
 
-        if (this.workspaceStatus) {
-             console.log(chalk.bold.cyan('\n--- Workspace Info ---'));
-             this.workspaceStatus.item.forEach(item => {
-                 console.log(`${item.key}: ${chalk.gray(item.value)}`);
-             });
-        }
-
-        if (this.buildMetrics?.actionSummary) {
-            console.log(chalk.bold.cyan('\n--- Build Metrics ---'));
+        // --- Performance Metrics ---
+        if (this.buildMetrics) {
+            console.log(chalk.bold.cyan('\n--- Performance Metrics ---'));
             const metrics = this.buildMetrics;
-            console.log(`Targets Configured: ${chalk.blue(formatNumber(metrics.targetMetrics.targetsConfigured))}`);
-            console.log(`Actions Executed: ${chalk.blue(formatNumber(metrics.actionSummary.actionsExecuted))}`);
-            
-            const table = new Table({ head: ['Action Type', 'Count'], colWidths: [30, 15], style: {head: ['cyan']} });
-            metrics.actionSummary.actionData
-                .filter(a => Number(a.actionsExecuted) > 0)
-                .sort((a,b) => Number(b.actionsExecuted) - Number(a.actionsExecuted))
-                .slice(0, 5) // Show top 5
-                .forEach(action => {
-                    table.push([action.mnemonic, formatNumber(action.actionsExecuted)]);
-                });
-            console.log(table.toString());
+            const perfTable = new Table({ style: {head: ['cyan'], border: ['gray']} });
+            perfTable.push(
+                [{ colSpan: 2, content: chalk.bold.white('Execution & Caching') }],
+                ['Actions Created', chalk.blue(formatNumber(metrics.actionSummary.actionsCreated || 'N/A'))],
+                ['Actions Executed', chalk.blue(formatNumber(metrics.actionSummary.actionsExecuted))]
+            );
+            if (metrics.actionSummary.actionCacheStatistics) {
+                const stats = metrics.actionSummary.actionCacheStatistics;
+                const total = Number(metrics.actionSummary.actionsExecuted);
+                const misses = stats.missDetails.reduce((s, d) => s + (Number(d.count) || 0), 0);
+                const hits = total - misses;
+                const hitRate = total > 0 ? (hits / total * 100).toFixed(2) : '0.00';
+                perfTable.push(['Action Cache', `${chalk.green(hitRate + '%')} hit (${formatNumber(hits)} hits / ${formatNumber(misses)} misses)`]);
+            }
+            if (metrics.memoryMetrics) {
+                perfTable.push([{ colSpan: 2, content: chalk.bold.white('Memory') }]);
+                if(metrics.memoryMetrics.peakPostGcHeapSize) perfTable.push(['Peak Heap Size (Post GC)', chalk.magenta(formatBytes(metrics.memoryMetrics.peakPostGcHeapSize))]);
+                if(metrics.memoryMetrics.usedHeapSizePostBuild) perfTable.push(['Used Heap (Post Build)', chalk.magenta(formatBytes(metrics.memoryMetrics.usedHeapSizePostBuild))]);
+            }
+            console.log(perfTable.toString());
         }
 
+        // --- Artifact Metrics ---
+        if (this.buildMetrics?.artifactMetrics) {
+            console.log(chalk.bold.cyan('\n--- Artifact Metrics ---'));
+            const { sourceArtifactsRead, outputArtifactsSeen, topLevelArtifacts } = this.buildMetrics.artifactMetrics;
+            const artifactTable = new Table({ head: ['Metric', 'Count', 'Size'], style: { head: ['cyan'] }});
+            artifactTable.push(['Source Artifacts Read', formatNumber(sourceArtifactsRead.count), formatBytes(sourceArtifactsRead.sizeInBytes)]);
+            artifactTable.push(['Output Artifacts Seen', formatNumber(outputArtifactsSeen.count), formatBytes(outputArtifactsSeen.sizeInBytes)]);
+            if(topLevelArtifacts) artifactTable.push(['Top-Level Artifacts', formatNumber(topLevelArtifacts.count), formatBytes(topLevelArtifacts.sizeInBytes)]);
+            console.log(artifactTable.toString());
+        }
+        
+        // --- Build Graph Metrics ---
+        if (this.buildMetrics?.buildGraphMetrics) {
+            console.log(chalk.bold.cyan('\n--- Build Graph Metrics ---'));
+            const { actionCount, outputArtifactCount, builtValues } = this.buildMetrics.buildGraphMetrics;
+            const graphTable = new Table({ style: { border: ['gray'] }});
+            graphTable.push(
+                ['Total Actions in Graph', chalk.blue(formatNumber(actionCount))],
+                ['Total Output Artifacts', chalk.blue(formatNumber(outputArtifactCount))]
+            );
+            console.log(graphTable.toString());
+            if (builtValues && builtValues.length > 0) {
+                console.log(chalk.bold.cyan('\n--- Top 10 Built SkyFunctions ---'));
+                const skyFunctionTable = new Table({ head: ['SkyFunction', 'Eval Count'], style: { head: ['cyan'] } });
+                builtValues
+                    .sort((a,b) => Number(b.count) - Number(a.count))
+                    .slice(0, 10)
+                    .forEach(v => skyFunctionTable.push([v.skyfunctionName, formatNumber(v.count)]));
+                console.log(skyFunctionTable.toString());
+            }
+        }
+        
+        // --- BUGFIX: Worker & Network Metrics ---
+        if (this.buildMetrics) {
+            const hasWorkerMetrics = this.buildMetrics.workerMetrics && this.buildMetrics.workerMetrics.length > 0;
+            const hasNetworkMetrics = this.buildMetrics.networkMetrics && this.buildMetrics.networkMetrics.systemNetworkStats;
+            if (hasWorkerMetrics || hasNetworkMetrics) {
+                console.log(chalk.bold.cyan('\n--- Worker & Network Metrics ---'));
+                const workerNetworkTable = new Table({ style: { border: ['gray'] } });
+                if (hasWorkerMetrics) {
+                    const totalActions = this.buildMetrics.workerMetrics!.reduce((sum, w) => sum + Number(w.actionsExecuted), 0);
+                    workerNetworkTable.push(['Total Worker Actions', formatNumber(totalActions)]);
+                }
+                if (hasNetworkMetrics) {
+                    const { bytesSent, bytesRecv } = this.buildMetrics.networkMetrics!.systemNetworkStats!;
+                    workerNetworkTable.push(['Network Traffic', `Sent: ${formatBytes(bytesSent)}, Received: ${formatBytes(bytesRecv)}`]);
+                }
+                console.log(workerNetworkTable.toString());
+            }
+        }
+        
+        // --- Build Tool Logs ---
+        if (this.buildToolLogs) {
+            console.log(chalk.bold.cyan('\n--- Build Tool Logs ---'));
+            this.buildToolLogs.log.forEach(log => {
+                if(log.contents) {
+                    try {
+                        const decoded = Buffer.from(log.contents, 'base64').toString('utf-8');
+                        if (log.name === 'critical path') {
+                             console.log(chalk.yellow(`Critical Path Summary:`));
+                             const criticalPathContent = decoded.split('\n').filter(line => line.trim().length > 0);
+                             console.log(chalk.gray(criticalPathContent.map(l => `  ${l}`).join('\n')));
+                        } else {
+                            console.log(`${chalk.yellow(log.name)}: ${chalk.gray(decoded)}`);
+                        }
+                    } catch (e) {}
+                } else if(log.uri) {
+                    console.log(`${chalk.yellow(log.name)}: ${chalk.gray(log.uri)}`);
+                }
+            });
+        }
+
+        // --- Problems & Failures ---
         if (this.problems.length > 0) {
             console.log(chalk.bold.red('\n--- Problems ---'));
             this.problems.forEach(p => console.log(chalk.red(`- ${p.message}`)));
@@ -179,43 +300,61 @@ export class StaticBepAnalyzer {
             });
         }
         
-        const failedActions = this.actions.filter(a => !a.success);
-        if (failedActions.length > 0) {
-            console.log(chalk.bold.red('\n--- Failed Actions ---'));
-            const table = new Table({ head: ['Action Type', 'Target/Label'], colWidths: [20, 80] });
-            failedActions.forEach(action => {
-                table.push([
-                    action.mnemonic,
-                    action.label || action.primaryOutput?.uri.replace('file://', '') || 'N/A'
-                ]);
-            });
-            console.log(table.toString());
+        // --- Action Details ---
+        if (this.actionDetails !== 'none') {
+            const actionsToDetail = this.actionDetails === 'all' 
+                ? this.actions 
+                : this.actions.filter(a => !a.success);
+
+            if (actionsToDetail.length > 0) {
+                const title = this.actionDetails === 'all' ? '--- All Action Details ---' : '--- Failed Action Details ---';
+                console.log(chalk.bold.cyan(`\n${title}`));
+                const groupedActions = new Map<string, Action[]>();
+                actionsToDetail.forEach(action => {
+                    const key = action.label || 'Unknown Label';
+                    if (!groupedActions.has(key)) groupedActions.set(key, []);
+                    groupedActions.get(key)!.push(action);
+                });
+
+                groupedActions.forEach((actions, label) => {
+                    const anyFailed = actions.some(a => !a.success);
+                    const status = anyFailed ? chalk.red.bold('❌ FAILURE') : chalk.green.bold('✔ SUCCESS');
+                    console.log(`\n${chalk.bold.white(`${status} | ${label} (${actions.length} action${actions.length > 1 ? 's' : ''})`)}`);
+
+                    actions.sort((a,b) => parseInt(b.actionResult.executionInfo.wallTimeMillis, 10) - parseInt(a.actionResult.executionInfo.wallTimeMillis, 10));
+
+                    actions.forEach((action, index) => {
+                        const duration = formatDuration(parseInt(action.actionResult.executionInfo.wallTimeMillis, 10));
+                        console.log(`  [${index + 1}] Type: ${chalk.blue(action.mnemonic)} | Duration: ${chalk.yellow(duration)}`);
+                        if (action.argv && action.argv.length > 0) {
+                            console.log(chalk.yellow('    Command Line:'));
+                            console.log(chalk.gray(`      ${action.argv.join(' ').substring(0, 200)}...`));
+                        }
+                        if (action.stderrContent && action.stderrContent.trim()) {
+                            console.log(chalk.yellow('    Stderr:'));
+                            console.log(chalk.white(action.stderrContent.trim().split('\n').map(line => `      ${line}`).join('\n')));
+                        }
+                    });
+                });
+            }
         }
 
+        // --- Test Summary ---
         if (this.testSummaries.length > 0) {
             console.log(chalk.bold.cyan('\n--- Test Summary ---'));
             const table = new Table({ head: ['Target', 'Status', 'Total', 'Passed', 'Failed'], colWidths: [40, 15, 10, 10, 10] });
             this.testSummaries.forEach(summary => {
                  const status = summary.overallStatus === 'PASSED' ? chalk.green(summary.overallStatus) : chalk.red(summary.overallStatus);
-                 table.push([
-                     summary.label,
-                     status,
-                     summary.totalRunCount,
-                     chalk.green(summary.passed?.length || 0),
-                     chalk.red(summary.failed?.length || 0),
-                 ]);
+                 table.push([ summary.label, status, summary.totalRunCount, chalk.green(summary.passed?.length || 0), chalk.red(summary.failed?.length || 0) ]);
             });
             console.log(table.toString());
         }
 
+        // --- Top 10 Slowest Actions ---
         if (this.actions.length > 0) {
             console.log(chalk.bold.cyan('\n--- Top 10 Slowest Actions ---'));
-            this.actions.sort((a, b) => 
-                parseInt(b.actionResult.executionInfo.wallTimeMillis, 10) - 
-                parseInt(a.actionResult.executionInfo.wallTimeMillis, 10)
-            );
-
             const table = new Table({ head: ['Duration', 'Action Type', 'Output/Target'], colWidths: [12, 20, 60] });
+            this.actions.sort((a, b) => parseInt(b.actionResult.executionInfo.wallTimeMillis, 10) - parseInt(a.actionResult.executionInfo.wallTimeMillis, 10));
             this.actions.slice(0, 10).forEach(action => {
                 table.push([
                     chalk.yellow(formatDuration(parseInt(action.actionResult.executionInfo.wallTimeMillis, 10))),

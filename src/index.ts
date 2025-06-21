@@ -24,14 +24,23 @@ yargs(hideBin(process.argv))
           type: 'boolean',
           description: 'Watch the file for changes and update in real-time',
           default: false,
+        })
+        .option('action-details', {
+          type: 'string',
+          description: 'Set the level of detail for actions.',
+          choices: ['none', 'failed', 'all'],
+          default: 'failed',
         });
     },
     async (argv) => {
       const filePath = path.resolve(argv.file as string);
+      const actionDetails = argv.actionDetails as 'none' | 'failed' | 'all';
 
       if (argv.watch) {
         console.log(chalk.blue(`Watching file in real-time: ${filePath}`));
-        const analyzer = new LiveBepAnalyzer();
+        if (actionDetails !== 'none') console.log(chalk.yellow(`Action details mode: ${actionDetails}.`));
+        
+        const analyzer = new LiveBepAnalyzer(actionDetails);
         try {
           await analyzer.tailFile(filePath);
           console.log(chalk.bold.green('Build finished. Generating final report...'));
@@ -44,7 +53,9 @@ yargs(hideBin(process.argv))
         }
       } else {
         console.log(chalk.blue(`Analyzing completed file: ${filePath}`));
-        const analyzer = new StaticBepAnalyzer();
+        if (actionDetails !== 'none') console.log(chalk.yellow(`Action details mode: ${actionDetails}.`));
+
+        const analyzer = new StaticBepAnalyzer(actionDetails);
         await analyzer.analyze(filePath);
         analyzer.printReport();
         console.log(chalk.bold.green('\nAnalysis complete.'));
