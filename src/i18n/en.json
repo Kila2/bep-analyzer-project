@@ -1,0 +1,126 @@
+{
+  "analysisComplete": "Analysis complete.",
+  "analysisFailed": "Analysis failed due to an error.",
+  "buildSummary": {
+    "title": "Build Summary",
+    "status": "Status",
+    "totalTime": "Total Time",
+    "analysisPhase": "Analysis Phase",
+    "executionPhase": "Execution Phase",
+    "exitCodeSuccess": "SUCCESS",
+    "exitCodeFailure": "FAILURE"
+  },
+  "buildEnv": {
+    "title": "Build Environment & Options",
+    "invocationDetails": "Invocation Details",
+    "command": "Command",
+    "targets": "Targets",
+    "explicitOptions": "Explicit Command-Line Options",
+    "canonicalCommandLine": "Canonical Command Line",
+    "optionsDescription": "Options Description"
+  },
+  "performanceMetrics": {
+    "title": "Performance Metrics",
+    "executionCaching": "Execution & Caching",
+    "actionsCreated": "Actions Created",
+    "actionsExecuted": "Actions Executed",
+    "actionCache": "Action Cache",
+    "actionCacheHit": "hit",
+    "actionCacheHits": "hits",
+    "actionCacheMisses": "misses",
+    "cacheMissBreakdown": "Cache Miss Breakdown",
+    "cacheMissReason": {
+      "NotCached": "Not Cached",
+      "DigestMismatch": "Digest Mismatch",
+      "CorruptedCacheEntry": "Corrupted Cache Entry",
+      "UnconditionalExecution": "Unconditional Execution",
+      "DifferentDeps": "Different Deps",
+      "DifferentActionKey": "Different Action Key",
+      "DifferentEnvironment": "Different Environment",
+      "DifferentFiles": "Different Files",
+      "explanation": "> **Why did my cache miss?** `Digest Mismatch` is the most common reason, indicating a change in the command, inputs, or environment. `Not Cached` means no entry was found. `Unconditional Execution` happens when an action is tagged 'no-cache'."
+    },
+    "memoryUsage": "Memory Usage",
+    "peakHeap": "Peak Heap Size (Post GC)",
+    "usedHeapPostBuild": "Used Heap (Post Build)",
+    "gcByType": "Garbage Collection by Type",
+    "totalGc": "Total Garbage Collected"
+  },
+  "artifactMetrics": {
+    "title": "Artifact Metrics",
+    "metric": "Metric",
+    "count": "Count",
+    "size": "Size",
+    "sourceRead": "Source Artifacts Read",
+    "outputSeen": "Output Artifacts Seen",
+    "topLevel": "Top-Level Artifacts"
+  },
+  "buildGraphMetrics": {
+    "title": "Build Graph Metrics",
+    "totalActions": "Total Actions in Graph",
+    "totalOutputs": "Total Output Artifacts",
+    "topSkyFunctions": "Top 10 Built SkyFunctions",
+    "skyFunction": "SkyFunction",
+    "evalCount": "Eval Count",
+    "skyFunctionsExplanation": "> **What are SkyFunctions?** They are the core evaluation units in Bazel's Skyframe engine. High counts for `FILE_STATE` and `DIRECTORY_LISTING` are normal as Bazel checks for file changes. A high count for `CONFIGURED_TARGET` indicates a large number of targets were analyzed in the build."
+  },
+  "workerNetworkMetrics": {
+    "title": "Worker & Network Metrics",
+    "totalWorkerActions": "Total Worker Actions",
+    "networkTraffic": "Network Traffic",
+    "sent": "Sent",
+    "received": "Received"
+  },
+  "buildToolLogs": {
+    "title": "Build Tool Logs",
+    "criticalPathSummary": "Critical Path Summary"
+  },
+  "problemsFailures": {
+    "problemsTitle": "Problems",
+    "failedTargetsTitle": "Failed Targets"
+  },
+  "actionDetails": {
+    "titleAll": "All Action Details",
+    "titleFailed": "Failed Action Details",
+    "actionCount": "action",
+    "actionCountPlural": "actions",
+    "statusSuccess": "SUCCESS",
+    "statusFailure": "FAILURE",
+    "type": "Type",
+    "duration": "Duration",
+    "primaryOutput": "Primary Output",
+    "commandLine": "Command Line",
+    "stderr": "Stderr",
+    "searchPlaceholder": "Search actions...",
+    "copyButton": "Copy",
+    "copiedButton": "Copied!",
+    "badgeActions": "{{count}} actions",
+    "badgeFailed": "{{count}} failed",
+    "badgeTotalTime": "Total Time"
+  },
+  "testSummary": {
+    "title": "Test Summary",
+    "target": "Target",
+    "status": "Status",
+    "total": "Total",
+    "passed": "Passed",
+    "failed": "Failed"
+  },
+  "slowestActions": {
+    "title": "Top 10 Slowest Actions",
+    "duration": "Duration",
+    "actionType": "Action Type",
+    "outputTarget": "Output/Target"
+  },
+  "buildOutputs": {
+    "title": "Build Outputs",
+    "target": "Target",
+    "files": "Files"
+  },
+  "convenienceSymlinks": {
+    "title": "Convenience Symlinks",
+    "path": "Path",
+    "action": "Action",
+    "target": "Target"
+  }
+}

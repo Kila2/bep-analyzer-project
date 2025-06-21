@@ -1,0 +1,126 @@
+{
+  "analysisComplete": "分析完成。",
+  "analysisFailed": "分析因错误失败。",
+  "buildSummary": {
+    "title": "构建摘要",
+    "status": "状态",
+    "totalTime": "总耗时",
+    "analysisPhase": "分析阶段",
+    "executionPhase": "执行阶段",
+    "exitCodeSuccess": "成功",
+    "exitCodeFailure": "失败"
+  },
+  "buildEnv": {
+    "title": "构建环境与选项",
+    "invocationDetails": "调用详情",
+    "command": "命令",
+    "targets": "目标",
+    "explicitOptions": "显式指定的命令行选项",
+    "canonicalCommandLine": "规范化命令行",
+    "optionsDescription": "选项描述"
+  },
+  "performanceMetrics": {
+    "title": "性能指标",
+    "executionCaching": "执行与缓存",
+    "actionsCreated": "已创建的动作",
+    "actionsExecuted": "已执行的动作",
+    "actionCache": "动作缓存",
+    "actionCacheHit": "命中",
+    "actionCacheHits": "次命中",
+    "actionCacheMisses": "次未命中",
+    "cacheMissBreakdown": "缓存未命中原因分析",
+    "cacheMissReason": {
+      "NotCached": "未缓存",
+      "DigestMismatch": "摘要不匹配",
+      "CorruptedCacheEntry": "缓存条目损坏",
+      "UnconditionalExecution": "强制执行",
+      "DifferentDeps": "依赖不同",
+      "DifferentActionKey": "动作 Key 不同",
+      "DifferentEnvironment": "环境不同",
+      "DifferentFiles": "文件不同",
+      "explanation": "> **为什么我的缓存会未命中？** `摘要不匹配 (Digest Mismatch)` 是最常见的原因，表明命令、输入文件或环境发生了变化。`未缓存 (Not Cached)` 意味着缓存中没有找到对应条目。`强制执行 (Unconditional Execution)` 则是因为该动作被标记为 'no-cache'。"
+    },
+    "memoryUsage": "内存使用情况",
+    "peakHeap": "峰值堆大小 (GC后)",
+    "usedHeapPostBuild": "构建后已用堆大小",
+    "gcByType": "按类型分的垃圾回收",
+    "totalGc": "总垃圾回收量"
+  },
+  "artifactMetrics": {
+    "title": "产物指标",
+    "metric": "指标",
+    "count": "数量",
+    "size": "大小",
+    "sourceRead": "源文件读取",
+    "outputSeen": "输出产物总览",
+    "topLevel": "顶层产物"
+  },
+  "buildGraphMetrics": {
+    "title": "构建图谱指标",
+    "totalActions": "图中总动作数",
+    "totalOutputs": "总输出产物数",
+    "topSkyFunctions": "Top 10 SkyFunction 调用",
+    "skyFunction": "SkyFunction",
+    "evalCount": "调用次数",
+    "skyFunctionsExplanation": "> **什么是 SkyFunctions?** 它们是 Bazel 的 Skyframe 增量执行引擎的核心评估单元。`FILE_STATE`（文件状态）和 `DIRECTORY_LISTING`（目录列表）的高计数是正常的，因为 Bazel 需要检查文件变更。`CONFIGURED_TARGET`（已配置目标）的高计数则表示本次构建分析了大量的目标。"
+  },
+  "workerNetworkMetrics": {
+    "title": "Worker 与网络指标",
+    "totalWorkerActions": "Worker 执行的动作总数",
+    "networkTraffic": "网络流量",
+    "sent": "发送",
+    "received": "接收"
+  },
+  "buildToolLogs": {
+    "title": "构建工具日志",
+    "criticalPathSummary": "关键路径摘要"
+  },
+  "problemsFailures": {
+    "problemsTitle": "问题",
+    "failedTargetsTitle": "失败的目标"
+  },
+  "actionDetails": {
+    "titleAll": "所有动作详情",
+    "titleFailed": "失败的动作详情",
+    "actionCount": "个动作",
+    "actionCountPlural": "个动作",
+    "statusSuccess": "成功",
+    "statusFailure": "失败",
+    "type": "类型",
+    "duration": "耗时",
+    "primaryOutput": "主要输出",
+    "commandLine": "命令行",
+    "stderr": "标准错误输出",
+    "searchPlaceholder": "搜索动作...",
+    "copyButton": "复制",
+    "copiedButton": "已复制!",
+    "badgeActions": "{{count}} 个动作",
+    "badgeFailed": "{{count}} 个失败",
+    "badgeTotalTime": "总耗时"
+  },
+  "testSummary": {
+    "title": "测试摘要",
+    "target": "目标",
+    "status": "状态",
+    "total": "总数",
+    "passed": "通过",
+    "failed": "失败"
+  },
+  "slowestActions": {
+    "title": "Top 10 最慢的动作",
+    "duration": "耗时",
+    "actionType": "动作类型",
+    "outputTarget": "输出/目标"
+  },
+  "buildOutputs": {
+    "title": "构建产物",
+    "target": "目标",
+    "files": "文件"
+  },
+  "convenienceSymlinks": {
+    "title": "便捷符号链接",
+    "path": "路径",
+    "action": "动作",
+    "target": "目标"
+  }
+}

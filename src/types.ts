@@ -266,3 +266,23 @@ export interface BuildMetrics {
     workerPoolMetrics?: WorkerPoolMetrics;
     networkMetrics?: NetworkMetrics;
 }
+
+// A structured object containing all processed data for reporting.
+export interface ReportData {
+    buildStarted: BuildStarted | null;
+    buildFinished: BuildFinished | null;
+    buildMetrics: BuildMetrics | null;
+    buildToolLogs: BuildToolLogs | null;
+    actions: Action[];
+    testSummaries: TestSummary[];
+    problems: Problem[];
+    failedTargets: {label: string, configId?: string}[];
+    workspaceStatus: WorkspaceStatus | null;
+    configurations: Map<string, Configuration>;
+    optionsParsed: OptionsParsed | null;
+    structuredCommandLine: StructuredCommandLine | null;
+    buildPatterns: string[];
+    resolvedOutputs: Map<string, string[]>;
+    convenienceSymlinks: ConvenienceSymlink[];
+    actionDetails: 'none' | 'failed' | 'all';
+}

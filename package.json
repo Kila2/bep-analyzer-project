@@ -1,7 +1,7 @@
 {
   "name": "bep-analyzer",
-  "version": "1.6.8",
-  "description": "A tool to analyze and pretty-print Bazel BEP files, with both static and real-time modes.",
+  "version": "1.7.3",
+  "description": "A tool to analyze Bazel BEP files, with static/live modes and markdown/html report generation.",
   "main": "dist/index.js",
   "bin": {
     "bep-analyzer": "./dist/index.js",
@@ -18,18 +18,22 @@
     "bep",
     "build",
     "typescript",
-    "performance"
+    "performance",
+    "report"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "ansi-to-html": "^0.7.2",
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.3",
     "log-update": "^4.0.0",
+    "marked": "^9.1.2",
     "tail": "^2.2.6",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@types/marked": "^5.0.2",
     "@types/node": "^20.8.4",
     "@types/tail": "^2.2.1",
     "@types/yargs": "^17.0.28",
