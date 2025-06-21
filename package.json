@@ -1,0 +1,38 @@
+{
+  "name": "bep-analyzer",
+  "version": "1.1.0",
+  "description": "A tool to analyze and pretty-print Bazel BEP files, with both static and real-time modes.",
+  "main": "dist/index.js",
+  "bin": {
+    "bep-analyzer": "./dist/index.js",
+    "bep-simulator": "./dist/simulator.js"
+  },
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "simulate": "ts-node src/simulator.ts",
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "bazel",
+    "bep",
+    "build",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.3",
+    "log-update": "^4.0.0",
+    "tail": "^2.2.6",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.4",
+    "@types/tail": "^2.2.1",
+    "@types/yargs": "^17.0.28",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
+  }
+}
