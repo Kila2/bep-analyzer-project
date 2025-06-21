@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { BepEvent, Action, TestSummary, BuildFinished, BuildStarted, Problem, WorkspaceStatus, Configuration, BuildMetrics, BuildToolLogs } from './types';
+import { BepEvent, Action, TestSummary, BuildFinished, BuildStarted, Problem, WorkspaceStatus, Configuration, BuildMetrics, BuildToolLogs, OptionsParsed, StructuredCommandLine } from './types';
 
 function formatDuration(ms: number): string {
     if (ms < 1000) {
@@ -42,8 +42,14 @@ export class StaticBepAnalyzer {
     protected readonly failedTargets: {label: string, configId?: string}[] = [];
     protected workspaceStatus: WorkspaceStatus | null = null;
     protected readonly configurations: Map<string, Configuration> = new Map();
+    protected optionsParsed: OptionsParsed | null = null;
+    protected structuredCommandLine: StructuredCommandLine | null = null;
+    protected buildPatterns: string[] = [];
 
-    constructor(protected actionDetails: 'none' | 'failed' | 'all' = 'failed') {}
+    constructor(
+        protected actionDetails: 'none' | 'failed' | 'all' = 'failed',
+        protected fullCommandLine: boolean = false
+    ) {}
 
     public async analyze(filePath: string) {
         if (!fs.existsSync(filePath)) {
@@ -154,6 +160,17 @@ export class StaticBepAnalyzer {
             case 'workspaceStatus':
                 if (data.workspaceStatus) this.workspaceStatus = data.workspaceStatus;
                 break;
+            case 'optionsParsed':
+                if (data.optionsParsed) this.optionsParsed = data.optionsParsed;
+                break;
+            case 'structuredCommandLine':
+                if (data.structuredCommandLine && data.structuredCommandLine.commandLineLabel === 'canonical') {
+                    this.structuredCommandLine = data.structuredCommandLine;
+                }
+                break;
+            case 'pattern':
+                if (id.pattern?.pattern) this.buildPatterns.push(...id.pattern.pattern);
+                break;
             case 'configuration':
                 if (data.configuration) this.configurations.set(id.configuration!.id, data.configuration);
                 break;
@@ -185,8 +202,36 @@ export class StaticBepAnalyzer {
             console.log(`  - Analysis Phase: ${chalk.magenta(formatDuration(Number(metrics.analysisPhaseTimeInMs)))}`);
             console.log(`  - Execution Phase: ${chalk.magenta(formatDuration(Number(metrics.executionPhaseTimeInMs)))}`);
         }
-        console.log(`Command: ${chalk.gray(this.buildStarted.command)}`);
 
+        // --- Build Environment & Options ---
+        console.log(chalk.bold.cyan('\n--- Build Environment & Options ---'));
+        const envTable = new Table({ colWidths: [30, 70], style: { border: ['gray'], head: [] }, wordWrap: true });
+        envTable.push([{ colSpan: 2, content: chalk.bold.white('Invocation Details') }]);
+        envTable.push(['Command', chalk.gray(this.buildStarted.command)]);
+        if (this.buildPatterns.length > 0) {
+             envTable.push(['Targets', chalk.gray(this.buildPatterns.join(', '))]);
+        }
+        if (this.workspaceStatus) {
+            this.workspaceStatus.item.forEach(item => {
+                envTable.push([item.key, chalk.gray(item.value || '')]);
+            });
+        }
+        if(envTable.length > 1) console.log(envTable.toString());
+        
+        if (this.optionsParsed?.explicitCmdLine && this.optionsParsed.explicitCmdLine.length > 0) {
+            console.log(chalk.bold.white('\nExplicit Command-Line Options:'));
+            this.optionsParsed.explicitCmdLine.forEach(opt => console.log(chalk.gray(`  ${opt}`)));
+        }
+        
+        if (this.structuredCommandLine) {
+            console.log(chalk.bold.white('\nCanonical Command Line:'));
+            const cmd = this.structuredCommandLine.sections.flatMap(s => s.chunkList?.chunk || s.optionList?.option.map(o => o.combinedForm) || []).join(' ');
+            console.log(chalk.gray(cmd));
+        } else if (this.buildStarted.optionsDescription) {
+            console.log(chalk.bold.white('\nOptions Description:'));
+            console.log(chalk.gray(this.buildStarted.optionsDescription));
+        }
+        
         // --- Performance Metrics ---
         if (this.buildMetrics) {
             console.log(chalk.bold.cyan('\n--- Performance Metrics ---'));
@@ -199,11 +244,12 @@ export class StaticBepAnalyzer {
             );
             if (metrics.actionSummary.actionCacheStatistics) {
                 const stats = metrics.actionSummary.actionCacheStatistics;
-                const total = Number(metrics.actionSummary.actionsExecuted);
                 const misses = stats.missDetails.reduce((s, d) => s + (Number(d.count) || 0), 0);
-                const hits = total - misses;
-                const hitRate = total > 0 ? (hits / total * 100).toFixed(2) : '0.00';
-                perfTable.push(['Action Cache', `${chalk.green(hitRate + '%')} hit (${formatNumber(hits)} hits / ${formatNumber(misses)} misses)`]);
+                const hits = Number(metrics.artifactMetrics?.outputArtifactsFromActionCache?.count || 0);
+                const totalLookups = hits + misses;
+                const hitRate = totalLookups > 0 ? ((hits / totalLookups) * 100).toFixed(2) : '0.00';
+                const hitRateColor = hits > 0 ? chalk.green : chalk.yellow;
+                perfTable.push(['Action Cache', `${hitRateColor(hitRate + '%')} hit (${formatNumber(hits)} hits / ${formatNumber(misses)} misses)`]);
             }
             if (metrics.memoryMetrics) {
                 perfTable.push([{ colSpan: 2, content: chalk.bold.white('Memory') }]);
@@ -245,7 +291,7 @@ export class StaticBepAnalyzer {
             }
         }
         
-        // --- BUGFIX: Worker & Network Metrics ---
+        // --- Worker & Network Metrics ---
         if (this.buildMetrics) {
             const hasWorkerMetrics = this.buildMetrics.workerMetrics && this.buildMetrics.workerMetrics.length > 0;
             const hasNetworkMetrics = this.buildMetrics.networkMetrics && this.buildMetrics.networkMetrics.systemNetworkStats;
@@ -260,7 +306,7 @@ export class StaticBepAnalyzer {
                     const { bytesSent, bytesRecv } = this.buildMetrics.networkMetrics!.systemNetworkStats!;
                     workerNetworkTable.push(['Network Traffic', `Sent: ${formatBytes(bytesSent)}, Received: ${formatBytes(bytesRecv)}`]);
                 }
-                console.log(workerNetworkTable.toString());
+                if (workerNetworkTable.length > 0) console.log(workerNetworkTable.toString());
             }
         }
         
@@ -327,8 +373,10 @@ export class StaticBepAnalyzer {
                         const duration = formatDuration(parseInt(action.actionResult.executionInfo.wallTimeMillis, 10));
                         console.log(`  [${index + 1}] Type: ${chalk.blue(action.mnemonic)} | Duration: ${chalk.yellow(duration)}`);
                         if (action.argv && action.argv.length > 0) {
+                            const command = action.argv.join(' ');
+                            const displayedCommand = this.fullCommandLine ? command : `${command.substring(0, 200)}...`;
                             console.log(chalk.yellow('    Command Line:'));
-                            console.log(chalk.gray(`      ${action.argv.join(' ').substring(0, 200)}...`));
+                            console.log(chalk.gray(`      ${displayedCommand}`));
                         }
                         if (action.stderrContent && action.stderrContent.trim()) {
                             console.log(chalk.yellow('    Stderr:'));

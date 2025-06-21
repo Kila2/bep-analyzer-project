@@ -30,17 +30,24 @@ yargs(hideBin(process.argv))
           description: 'Set the level of detail for actions.',
           choices: ['none', 'failed', 'all'],
           default: 'failed',
+        })
+        .option('full-command-line', {
+          alias: 'F',
+          type: 'boolean',
+          description: 'Display the full, unabridged command line for actions',
+          default: false,
         });
     },
     async (argv) => {
       const filePath = path.resolve(argv.file as string);
       const actionDetails = argv.actionDetails as 'none' | 'failed' | 'all';
+      const fullCommandLine = argv.fullCommandLine as boolean;
 
       if (argv.watch) {
         console.log(chalk.blue(`Watching file in real-time: ${filePath}`));
         if (actionDetails !== 'none') console.log(chalk.yellow(`Action details mode: ${actionDetails}.`));
         
-        const analyzer = new LiveBepAnalyzer(actionDetails);
+        const analyzer = new LiveBepAnalyzer(actionDetails, fullCommandLine);
         try {
           await analyzer.tailFile(filePath);
           console.log(chalk.bold.green('Build finished. Generating final report...'));
@@ -55,7 +62,7 @@ yargs(hideBin(process.argv))
         console.log(chalk.blue(`Analyzing completed file: ${filePath}`));
         if (actionDetails !== 'none') console.log(chalk.yellow(`Action details mode: ${actionDetails}.`));
 
-        const analyzer = new StaticBepAnalyzer(actionDetails);
+        const analyzer = new StaticBepAnalyzer(actionDetails, fullCommandLine);
         await analyzer.analyze(filePath);
         analyzer.printReport();
         console.log(chalk.bold.green('\nAnalysis complete.'));

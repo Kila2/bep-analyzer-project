@@ -12,6 +12,9 @@ export interface BepEvent {
     configuration?: { id: string };
     buildMetrics?: any;
     buildToolLogs?: any;
+    optionsParsed?: any;
+    pattern?: { pattern: string[] };
+    structuredCommandLine?: { commandLineLabel: string };
 
     // Keys found in hierarchical/older BEP formats
     started?: any; 
@@ -30,6 +33,9 @@ export interface BepEvent {
   configuration?: Configuration;
   buildMetrics?: BuildMetrics;
   buildToolLogs?: BuildToolLogs;
+  optionsParsed?: OptionsParsed;
+  expanded?: any;
+  structuredCommandLine?: StructuredCommandLine;
   action?: Action; 
 }
 
@@ -69,6 +75,7 @@ export interface BuildFinished {
 export interface BuildStarted {
   command: string;
   startTimeMillis: string;
+  optionsDescription?: string;
 }
 
 export interface Problem {
@@ -77,6 +84,22 @@ export interface Problem {
 
 export interface WorkspaceStatus {
     item: { key: string; value: string }[];
+}
+
+export interface OptionsParsed {
+    startupOptions: string[];
+    explicitStartupOptions: string[];
+    cmdLine: string[];
+    explicitCmdLine: string[];
+}
+
+export interface StructuredCommandLine {
+    commandLineLabel: string;
+    sections: { 
+        sectionLabel: string;
+        chunkList?: { chunk: string[] };
+        optionList?: { option: { combinedForm: string }[] };
+    }[];
 }
 
 export interface Configuration {
