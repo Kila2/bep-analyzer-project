@@ -51,7 +51,7 @@ export class StaticBepAnalyzer {
 
     constructor(
         protected actionDetails: 'none' | 'failed' | 'all' = 'failed',
-        protected fullCommandLine: boolean = false
+        protected wideLevel: number = 0
     ) {}
 
     public async analyze(filePath: string) {
@@ -465,7 +465,16 @@ export class StaticBepAnalyzer {
 
                         if (action.argv && action.argv.length > 0) {
                             const command = action.argv.join(' ');
-                            const displayedCommand = this.fullCommandLine ? command : `${command.substring(0, 200)}...`;
+                            let displayedCommand: string;
+
+                            if (this.wideLevel >= 2) { // -ww
+                                displayedCommand = command;
+                            } else if (this.wideLevel === 1) { // -w
+                                displayedCommand = command.length > 500 ? `${command.substring(0, 500)}...` : command;
+                            } else { // default
+                                displayedCommand = command.length > 200 ? `${command.substring(0, 200)}...` : command;
+                            }
+
                             console.log(chalk.yellow('    Command Line:'));
                             console.log(chalk.gray(`      ${displayedCommand}`));
                         }
@@ -492,7 +501,18 @@ export class StaticBepAnalyzer {
         // --- Top 10 Slowest Actions ---
         if (this.actions.length > 0) {
             console.log(chalk.bold.cyan('\n--- Top 10 Slowest Actions ---'));
-            const table = new Table({ head: ['Duration', 'Action Type', 'Output/Target'], colWidths: [12, 20, 60] });
+            
+            let colWidths: (number | null)[];
+            if (this.wideLevel >= 2) { // -ww
+                colWidths = [12, 20, null]; // Let the last column auto-size
+            } else if (this.wideLevel === 1) { // -w
+                colWidths = [12, 20, 100];
+            } else { // default
+                colWidths = [12, 20, 60];
+            }
+
+            const table = new Table({ head: ['Duration', 'Action Type', 'Output/Target'], colWidths });
+
             this.actions.sort((a, b) => parseInt(b.actionResult?.executionInfo.wallTimeMillis || '0', 10) - parseInt(a.actionResult?.executionInfo.wallTimeMillis || '0', 10));
             this.actions.slice(0, 10).forEach(action => {
                 table.push([

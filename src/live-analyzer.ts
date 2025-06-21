@@ -76,9 +76,9 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
 
     constructor(
         actionDetails: 'none' | 'failed' | 'all' = 'failed',
-        fullCommandLine: boolean = false
+        wideLevel: number = 0
     ) {
-        super(actionDetails, fullCommandLine);
+        super(actionDetails, wideLevel);
     }
 
     public tailFile(filePath: string): Promise<void> {
@@ -224,9 +224,23 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
             if(this.recentLogs.length > 0) {
                 output.push('');
                 output.push(chalk.bold.cyan('--- Recent Activity ---'));
+                
+                const maxWidth = this.wideLevel >= 2 ? Infinity : (this.wideLevel === 1 ? 150 : 90);
+
                 this.recentLogs.forEach(log => {
-                    const cleanLog = stripAnsi(log).length > 90 ? stripAnsi(log).substring(0, 87) + '...' : stripAnsi(log);
-                     output.push(`  ${log.length > cleanLog.length ? (log.substring(0, cleanLog.length - 3) + '...') : log}`);
+                    if (maxWidth === Infinity) {
+                        output.push(`  ${log}`);
+                        return;
+                    }
+                    const cleanLog = stripAnsi(log);
+                    if (cleanLog.length > maxWidth) {
+                        // Truncate the clean (uncolored) string to guarantee width, sacrificing color.
+                        // This is the most robust way to prevent broken terminal output.
+                        output.push(`  ${cleanLog.substring(0, maxWidth - 3)}...`);
+                    } else {
+                        // If it fits, use the original colored log.
+                        output.push(`  ${log}`);
+                    }
                 });
             }
         }

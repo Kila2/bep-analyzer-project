@@ -20,7 +20,6 @@ yargs(hideBin(process.argv))
           demandOption: true,
         })
         .option('watch', {
-          alias: 'w',
           type: 'boolean',
           description: 'Watch the file for changes and update in real-time',
           default: false,
@@ -31,23 +30,22 @@ yargs(hideBin(process.argv))
           choices: ['none', 'failed', 'all'],
           default: 'failed',
         })
-        .option('full-command-line', {
-          alias: 'F',
-          type: 'boolean',
-          description: 'Display the full, unabridged command line for actions',
-          default: false,
+        .option('wide', {
+          alias: 'w',
+          type: 'count',
+          description: 'Widen command line output. Use -w for wider, -ww for unlimited.',
         });
     },
     async (argv) => {
       const filePath = path.resolve(argv.file as string);
       const actionDetails = argv.actionDetails as 'none' | 'failed' | 'all';
-      const fullCommandLine = argv.fullCommandLine as boolean;
+      const wideLevel = argv.w as number;
 
       if (argv.watch) {
         console.log(chalk.blue(`Watching file in real-time: ${filePath}`));
         if (actionDetails !== 'none') console.log(chalk.yellow(`Action details mode: ${actionDetails}.`));
         
-        const analyzer = new LiveBepAnalyzer(actionDetails, fullCommandLine);
+        const analyzer = new LiveBepAnalyzer(actionDetails, wideLevel);
         try {
           await analyzer.tailFile(filePath);
           console.log(chalk.bold.green('Build finished. Generating final report...'));
@@ -62,7 +60,7 @@ yargs(hideBin(process.argv))
         console.log(chalk.blue(`Analyzing completed file: ${filePath}`));
         if (actionDetails !== 'none') console.log(chalk.yellow(`Action details mode: ${actionDetails}.`));
 
-        const analyzer = new StaticBepAnalyzer(actionDetails, fullCommandLine);
+        const analyzer = new StaticBepAnalyzer(actionDetails, wideLevel);
         await analyzer.analyze(filePath);
         analyzer.printReport();
         console.log(chalk.bold.green('\nAnalysis complete.'));
