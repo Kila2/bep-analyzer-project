@@ -15,6 +15,8 @@ export interface BepEvent {
     optionsParsed?: any;
     pattern?: { pattern: string[] };
     structuredCommandLine?: { commandLineLabel: string };
+    namedSet?: { id: string };
+    convenienceSymlinksIdentified?: any;
 
     // Keys found in hierarchical/older BEP formats
     started?: any; 
@@ -26,7 +28,7 @@ export interface BepEvent {
   // Data fields can be at the top level or inside a payload
   started?: BuildStarted;
   finished?: BuildFinished;
-  completed?: any;
+  completed?: TargetCompleted;
   summary?: TestSummary;
   problem?: Problem;
   workspaceStatus?: WorkspaceStatus;
@@ -36,6 +38,8 @@ export interface BepEvent {
   optionsParsed?: OptionsParsed;
   expanded?: any;
   structuredCommandLine?: StructuredCommandLine;
+  namedSetOfFiles?: NamedSetOfFiles;
+  convenienceSymlinksIdentified?: ConvenienceSymlinksIdentified;
   action?: Action; 
 }
 
@@ -48,7 +52,7 @@ export interface Action {
   commandLine?: string[];
   stderr?: { uri: string };
   stderrContent?: string; 
-  actionResult: {
+  actionResult?: {
     executionInfo: {
       startTimeMillis: string;
       wallTimeMillis: string;
@@ -57,6 +61,31 @@ export interface Action {
   type?: string;
   startTime?: string;
   endTime?: string;
+}
+
+export interface File {
+    name: string;
+    uri: string;
+}
+
+export interface NamedSetOfFiles {
+    files: File[];
+    fileSets: { id: string }[];
+}
+
+export interface TargetCompleted {
+    success: boolean;
+    outputGroup: { name: string; fileSets: { id: string }[] }[];
+}
+
+export interface ConvenienceSymlink {
+    path: string;
+    action: 'CREATE' | 'DELETE' | 'UNKNOWN';
+    target?: string;
+}
+
+export interface ConvenienceSymlinksIdentified {
+    convenienceSymlinks: ConvenienceSymlink[];
 }
 
 export interface TestSummary {
@@ -70,6 +99,7 @@ export interface TestSummary {
 export interface BuildFinished {
   overallSuccess: boolean;
   finishTimeMillis: string;
+  exitCode?: { name: string };
 }
 
 export interface BuildStarted {
@@ -118,8 +148,6 @@ export interface BuildToolLog {
 export interface BuildToolLogs {
     log: BuildToolLog[];
 }
-
-// --- Comprehensive BuildMetrics types based on build_event_stream.proto ---
 
 export interface ActionMetric {
     mnemonic: string;

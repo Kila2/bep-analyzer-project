@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { BepEvent, Action, TestSummary, BuildFinished, BuildStarted, Problem, WorkspaceStatus, Configuration, BuildMetrics, BuildToolLogs, OptionsParsed, StructuredCommandLine } from './types';
+import { BepEvent, Action, TestSummary, BuildFinished, BuildStarted, Problem, WorkspaceStatus, Configuration, BuildMetrics, BuildToolLogs, OptionsParsed, StructuredCommandLine, NamedSetOfFiles, ConvenienceSymlink, TargetCompleted } from './types';
 
 function formatDuration(ms: number): string {
     if (ms < 1000) {
@@ -45,6 +45,9 @@ export class StaticBepAnalyzer {
     protected optionsParsed: OptionsParsed | null = null;
     protected structuredCommandLine: StructuredCommandLine | null = null;
     protected buildPatterns: string[] = [];
+    private readonly namedSets: Map<string, NamedSetOfFiles> = new Map();
+    private readonly convenienceSymlinks: ConvenienceSymlink[] = [];
+    private readonly topLevelOutputSets: Map<string, string[]> = new Map();
 
     constructor(
         protected actionDetails: 'none' | 'failed' | 'all' = 'failed',
@@ -102,17 +105,21 @@ export class StaticBepAnalyzer {
 
                     if (!action.mnemonic && action.type) action.mnemonic = action.type;
 
-                    if (!action.actionResult && action.startTime && action.endTime) {
-                        try {
-                            const start = new Date(action.startTime).getTime();
-                            const end = new Date(action.endTime).getTime();
-                            action.actionResult = {
-                                executionInfo: {
-                                    startTimeMillis: String(start),
-                                    wallTimeMillis: String(end - start),
-                                }
-                            };
-                        } catch(e) {}
+                    if (!action.actionResult) {
+                        let wallTimeMillis = '0';
+                        if (action.startTime && action.endTime) {
+                            try {
+                                const start = new Date(action.startTime).getTime();
+                                const end = new Date(action.endTime).getTime();
+                                wallTimeMillis = (end - start).toString();
+                            } catch(e) {}
+                        }
+                        action.actionResult = {
+                            executionInfo: {
+                                startTimeMillis: '0', // Not easily available here
+                                wallTimeMillis: wallTimeMillis,
+                            }
+                        };
                     }
 
                     const shouldProcessDetails = 
@@ -131,10 +138,7 @@ export class StaticBepAnalyzer {
                             }
                         }
                     }
-
-                    if (action.actionResult?.executionInfo?.wallTimeMillis) {
-                        this.actions.push(action);
-                    }
+                    this.actions.push(action);
                 }
                 break;
             case 'testSummary':
@@ -150,11 +154,22 @@ export class StaticBepAnalyzer {
                 if (data.problem) this.problems.push(data.problem as Problem);
                 break;
             case 'targetCompleted':
-                if (data.completed && !data.completed.success) {
-                    this.failedTargets.push({
-                        label: id.targetCompleted!.label,
-                        configId: id.targetCompleted!.configuration?.id
-                    });
+                const completedData = data.completed as TargetCompleted;
+                if (completedData) {
+                    if (!completedData.success) {
+                        this.failedTargets.push({
+                            label: id.targetCompleted!.label,
+                            configId: id.targetCompleted!.configuration?.id
+                        });
+                    } else {
+                        const cleanLabel = id.targetCompleted!.label.replace(/^(@@?)/, '');
+                        if (this.buildPatterns.some(p => cleanLabel.startsWith(p.replace(/^(@@?)/, '')))) {
+                            const fileSetIds = completedData.outputGroup?.flatMap(group => group.fileSets?.map(fs => fs.id) || []) || [];
+                            if (fileSetIds.length > 0) {
+                                this.topLevelOutputSets.set(id.targetCompleted!.label, fileSetIds);
+                            }
+                        }
+                    }
                 }
                 break;
             case 'workspaceStatus':
@@ -171,6 +186,16 @@ export class StaticBepAnalyzer {
             case 'pattern':
                 if (id.pattern?.pattern) this.buildPatterns.push(...id.pattern.pattern);
                 break;
+            case 'namedSet':
+                if (id.namedSet?.id && data.namedSetOfFiles) {
+                    this.namedSets.set(id.namedSet.id, data.namedSetOfFiles);
+                }
+                break;
+            case 'convenienceSymlinksIdentified':
+                if (data.convenienceSymlinksIdentified?.convenienceSymlinks) {
+                    this.convenienceSymlinks.push(...data.convenienceSymlinksIdentified.convenienceSymlinks);
+                }
+                break;
             case 'configuration':
                 if (data.configuration) this.configurations.set(id.configuration!.id, data.configuration);
                 break;
@@ -182,6 +207,29 @@ export class StaticBepAnalyzer {
                 break;
         }
     }
+    
+    private resolveFileSet(fileSetId: string): {name: string, uri: string}[] {
+        const seen = new Set<string>();
+        const queue = [fileSetId];
+        const result: {name: string, uri: string}[] = [];
+
+        while (queue.length > 0) {
+            const currentId = queue.shift()!;
+            if (seen.has(currentId)) continue;
+            seen.add(currentId);
+
+            const fileSet = this.namedSets.get(currentId);
+            if (!fileSet) continue;
+
+            if (fileSet.files) {
+                result.push(...fileSet.files);
+            }
+            if (fileSet.fileSets) {
+                queue.push(...fileSet.fileSets.map(fs => fs.id));
+            }
+        }
+        return result;
+    }
 
     public printReport(): void {
         if (!this.buildStarted || !this.buildFinished) {
@@ -192,7 +240,8 @@ export class StaticBepAnalyzer {
         // --- Build Summary ---
         console.log(chalk.bold.cyan('\n--- Build Summary ---'));
         const success = this.buildFinished.overallSuccess;
-        const status = success ? chalk.green('SUCCESS') : chalk.red('FAILURE');
+        const exitCodeName = this.buildFinished.exitCode?.name || (success ? 'SUCCESS' : 'FAILURE');
+        const status = success ? chalk.green(exitCodeName) : chalk.red(exitCodeName);
         console.log(`Status: ${status}`);
         const startTime = parseInt(this.buildStarted.startTimeMillis, 10);
         const finishTime = parseInt(this.buildFinished.finishTimeMillis, 10);
@@ -252,9 +301,22 @@ export class StaticBepAnalyzer {
                 perfTable.push(['Action Cache', `${hitRateColor(hitRate + '%')} hit (${formatNumber(hits)} hits / ${formatNumber(misses)} misses)`]);
             }
             if (metrics.memoryMetrics) {
-                perfTable.push([{ colSpan: 2, content: chalk.bold.white('Memory') }]);
-                if(metrics.memoryMetrics.peakPostGcHeapSize) perfTable.push(['Peak Heap Size (Post GC)', chalk.magenta(formatBytes(metrics.memoryMetrics.peakPostGcHeapSize))]);
-                if(metrics.memoryMetrics.usedHeapSizePostBuild) perfTable.push(['Used Heap (Post Build)', chalk.magenta(formatBytes(metrics.memoryMetrics.usedHeapSizePostBuild))]);
+                const memRows: any[] = [];
+                if(metrics.memoryMetrics.peakPostGcHeapSize) {
+                    memRows.push(['Peak Heap Size (Post GC)', chalk.magenta(formatBytes(metrics.memoryMetrics.peakPostGcHeapSize))]);
+                }
+                if(metrics.memoryMetrics.usedHeapSizePostBuild) {
+                    memRows.push(['Used Heap (Post Build)', chalk.magenta(formatBytes(metrics.memoryMetrics.usedHeapSizePostBuild))]);
+                }
+                if (metrics.memoryMetrics.garbageMetrics && metrics.memoryMetrics.garbageMetrics.length > 0 && memRows.length === 0) {
+                    const totalGarbage = metrics.memoryMetrics.garbageMetrics.reduce((sum, metric) => sum + Number(metric.garbageCollected), 0);
+                    memRows.push(['Total Garbage Collected', chalk.magenta(formatBytes(totalGarbage))]);
+                }
+                
+                if (memRows.length > 0) {
+                    perfTable.push([{ colSpan: 2, content: chalk.bold.white('Memory') }]);
+                    perfTable.push(...memRows);
+                }
             }
             console.log(perfTable.toString());
         }
@@ -367,10 +429,10 @@ export class StaticBepAnalyzer {
                     const status = anyFailed ? chalk.red.bold('❌ FAILURE') : chalk.green.bold('✔ SUCCESS');
                     console.log(`\n${chalk.bold.white(`${status} | ${label} (${actions.length} action${actions.length > 1 ? 's' : ''})`)}`);
 
-                    actions.sort((a,b) => parseInt(b.actionResult.executionInfo.wallTimeMillis, 10) - parseInt(a.actionResult.executionInfo.wallTimeMillis, 10));
+                    actions.sort((a,b) => parseInt(b.actionResult?.executionInfo.wallTimeMillis || '0', 10) - parseInt(a.actionResult?.executionInfo.wallTimeMillis || '0', 10));
 
                     actions.forEach((action, index) => {
-                        const duration = formatDuration(parseInt(action.actionResult.executionInfo.wallTimeMillis, 10));
+                        const duration = formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || '0', 10));
                         console.log(`  [${index + 1}] Type: ${chalk.blue(action.mnemonic)} | Duration: ${chalk.yellow(duration)}`);
                         if (action.argv && action.argv.length > 0) {
                             const command = action.argv.join(' ');
@@ -402,15 +464,45 @@ export class StaticBepAnalyzer {
         if (this.actions.length > 0) {
             console.log(chalk.bold.cyan('\n--- Top 10 Slowest Actions ---'));
             const table = new Table({ head: ['Duration', 'Action Type', 'Output/Target'], colWidths: [12, 20, 60] });
-            this.actions.sort((a, b) => parseInt(b.actionResult.executionInfo.wallTimeMillis, 10) - parseInt(a.actionResult.executionInfo.wallTimeMillis, 10));
+            this.actions.sort((a, b) => parseInt(b.actionResult?.executionInfo.wallTimeMillis || '0', 10) - parseInt(a.actionResult?.executionInfo.wallTimeMillis || '0', 10));
             this.actions.slice(0, 10).forEach(action => {
                 table.push([
-                    chalk.yellow(formatDuration(parseInt(action.actionResult.executionInfo.wallTimeMillis, 10))),
+                    chalk.yellow(formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || '0', 10))),
                     action.mnemonic,
                     action.primaryOutput?.uri.replace('file://', '') || action.label || 'N/A',
                 ]);
             });
             console.log(table.toString());
+        }
+        
+        // --- Build Outputs (Resolved at the end) ---
+        const resolvedOutputs = new Map<string, string[]>();
+        this.topLevelOutputSets.forEach((fileSetIds, target) => {
+            const files = new Set<string>();
+            fileSetIds.forEach(id => {
+                this.resolveFileSet(id).forEach(file => files.add(file.name));
+            });
+            resolvedOutputs.set(target, Array.from(files));
+        });
+
+        if (resolvedOutputs.size > 0) {
+            console.log(chalk.bold.cyan('\n--- Build Outputs ---'));
+            const outputsTable = new Table({ head: ['Target', 'Files'], style: { head: ['cyan'] }, colWidths: [40, 60], wordWrap: true });
+            resolvedOutputs.forEach((files, target) => {
+                outputsTable.push([target, files.join('\n')]);
+            });
+            console.log(outputsTable.toString());
+        }
+        
+        // --- Convenience Symlinks ---
+        if (this.convenienceSymlinks.length > 0) {
+            console.log(chalk.bold.cyan('\n--- Convenience Symlinks ---'));
+            const symlinksTable = new Table({ head: ['Path', 'Action', 'Target'], style: { head: ['cyan'] }});
+            this.convenienceSymlinks.forEach(link => {
+                const action = link.action === 'CREATE' ? chalk.green(link.action) : chalk.red(link.action);
+                symlinksTable.push([link.path, action, link.target || '']);
+            });
+            console.log(symlinksTable.toString());
         }
     }
 }
