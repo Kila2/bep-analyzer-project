@@ -185,15 +185,16 @@ export class MarkdownReporter {
         missDetails
           .filter((d) => Number(d.count) > 0)
           .sort((a, b) => Number(b.count) - Number(a.count))
+          .filter((detail) => detail.reason != undefined)
           .forEach((detail) => {
-            const pascalCaseReason = detail.reason
-              .replace(/_/g, " ")
+            const pascalCaseReason = detail
+              .reason!.replace(/_/g, " ")
               .toLowerCase()
               .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase())
               .replace(/\s/g, "");
             const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
-            const reason = this.t.t(reasonKey, { reason: detail.reason });
-            this.a(`| ${reason} | ${formatNumber(detail.count)} |`);
+            const reason = this.t.t(reasonKey, { reason: detail.reason! });
+            this.a(`| ${reason} | ${formatNumber(detail.count ?? 0)} |`);
           });
         this.a(`</div></div>`);
         this.a("");

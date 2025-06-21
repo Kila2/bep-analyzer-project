@@ -4,7 +4,6 @@ import AnsiToHtml from "ansi-to-html";
 import { marked } from "marked";
 
 export class HtmlReporter {
-  private output: string[] = [];
   private ansiConverter: AnsiToHtml;
 
   constructor(
@@ -15,6 +14,7 @@ export class HtmlReporter {
     this.ansiConverter = new AnsiToHtml({ newline: true, escapeXML: true });
   }
 
+  // --- Helper Methods ---
   private formatDuration(ms: number): string {
     if (ms < 1000) return `${ms}ms`;
     const seconds = ms / 1000;
@@ -23,7 +23,17 @@ export class HtmlReporter {
     const remainingSeconds = (seconds % 60).toFixed(0).padStart(2, "0");
     return `${minutes}m ${remainingSeconds}s`;
   }
-
+  private formatNumber(num: number | string): string {
+    return Number(num).toLocaleString();
+  }
+  private formatBytes(bytes: number | string): string {
+    const num = Number(bytes);
+    if (num === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(num) / Math.log(k));
+    return parseFloat((num / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  }
   private escapeAttr(text: string | undefined | null): string {
     if (text === null || text === undefined) return "";
     return String(text)
@@ -33,58 +43,191 @@ export class HtmlReporter {
       .replace(/>/g, ">");
   }
 
-  private a(line: string): void {
-    this.output.push(line);
+  // --- START OF CRITICAL FIX ---
+  /**
+   * Creates a markdown code block from text, safely handling file URIs.
+   */
+  private mdCode(text: string | undefined | null): string {
+    if (text === null || text === undefined) return "`N/A`";
+    // Clean up file URIs inside this safe helper
+    const cleanedText = String(text)
+      .replace(/^file:\/\//, "")
+      .replace(/`/g, "'");
+    return `\`${cleanedText}\``;
+  }
+  // --- END OF CRITICAL FIX ---
+
+  // --- Tab Content Builders ---
+  private buildReportTab(): string {
+    const {
+      buildMetrics,
+      actions,
+      workspaceStatus,
+      buildPatterns,
+      resolvedOutputs,
+      convenienceSymlinks,
+      structuredCommandLine,
+    } = this.data;
+
+    const buildStarted = this.data.buildStarted!;
+    const buildFinished = this.data.buildFinished!;
+
+    let html = "";
+
+    const renderSection = (
+      titleKey: string,
+      id: string,
+      content: string | null,
+    ) => {
+      if (!content || !content.trim()) return "";
+      const title = this.t.t(titleKey);
+      return `<div class="report-section"><h2 id="${id}" data-nav-title="${title}">${title}</h2>${content}</div>`;
+    };
+
+    // Summary
+    let summaryMd = `- **${this.t.t("buildSummary.status")}**: ${buildFinished.overallSuccess ? "✅" : "❌"} ${buildFinished.exitCode?.name || (buildFinished.overallSuccess ? "SUCCESS" : "FAILURE")}\n`;
+    summaryMd += `- **${this.t.t("buildSummary.totalTime")}**: ${this.formatDuration(parseInt(buildFinished.finishTimeMillis, 10) - parseInt(buildStarted.startTimeMillis, 10))}\n`;
+    if (buildMetrics?.timingMetrics) {
+      summaryMd += `  - **${this.t.t("buildSummary.analysisPhase")}**: ${this.formatDuration(Number(buildMetrics.timingMetrics.analysisPhaseTimeInMs))}\n`;
+      summaryMd += `  - **${this.t.t("buildSummary.executionPhase")}**: ${this.formatDuration(Number(buildMetrics.timingMetrics.executionPhaseTimeInMs))}\n`;
+    }
+    html += renderSection(
+      "buildSummary.title",
+      "summary",
+      marked.parse(summaryMd),
+    );
+
+    // Performance
+    if (buildMetrics) {
+      let perfContent = "";
+      let mainPerfMd = `| Metric | Value |\n|---|---|\n`;
+      mainPerfMd += `| ${this.t.t("performanceMetrics.actionsCreated")} | ${this.formatNumber(buildMetrics.actionSummary.actionsCreated || "N/A")} |\n`;
+      mainPerfMd += `| ${this.t.t("performanceMetrics.actionsExecuted")} | ${this.formatNumber(buildMetrics.actionSummary.actionsExecuted)} |\n`;
+      if (buildMetrics.actionSummary.actionCacheStatistics) {
+        const stats = buildMetrics.actionSummary.actionCacheStatistics;
+        const misses = stats.missDetails.reduce(
+          (s, d) => s + (Number(d.count) || 0),
+          0,
+        );
+        const hits = Number(
+          buildMetrics.artifactMetrics?.outputArtifactsFromActionCache?.count ||
+            stats.hits ||
+            0,
+        );
+        const total = hits + misses;
+        const hitRate = total > 0 ? ((hits / total) * 100).toFixed(2) : "0.00";
+        mainPerfMd += `| ${this.t.t("performanceMetrics.actionCache")} | ${hitRate}% hits (${this.formatNumber(hits)} / ${this.formatNumber(total)}) |\n`;
+      }
+      if (buildMetrics.memoryMetrics) {
+        if (buildMetrics.memoryMetrics.peakPostGcHeapSize)
+          mainPerfMd += `| ${this.t.t("performanceMetrics.peakHeap")} | ${this.formatBytes(buildMetrics.memoryMetrics.peakPostGcHeapSize)} |\n`;
+      }
+      perfContent += marked.parse(mainPerfMd);
+
+      if (
+        buildMetrics.actionSummary.actionCacheStatistics?.missDetails.length
+      ) {
+        let missMd = `| Reason | Count |\n|---|---|\n`;
+        buildMetrics.actionSummary.actionCacheStatistics.missDetails.forEach(
+          (d) => {
+            const reasonKey = `performanceMetrics.cacheMissReason.${d.reason?.replace(/[^a-zA-Z0-9]/g, "")}`;
+            missMd += `| ${this.t.t(reasonKey, { reason: d.reason ?? "" })} | ${this.formatNumber(d.count ?? 0)} |\n`;
+          },
+        );
+        perfContent += `<details><summary>${this.t.t("performanceMetrics.cacheMissBreakdown")}</summary>${marked.parse(missMd)}</details>`;
+      }
+      if (buildMetrics.memoryMetrics?.garbageMetrics) {
+        let gcMd = `| Type | Collected |\n|---|---|\n`;
+        buildMetrics.memoryMetrics.garbageMetrics.forEach(
+          (m) =>
+            (gcMd += `| ${m.type} | ${this.formatBytes(m.garbageCollected)} |\n`),
+        );
+        perfContent += `<details><summary>${this.t.t("performanceMetrics.gcByType")}</summary>${marked.parse(gcMd)}</details>`;
+      }
+      html += renderSection(
+        "performanceMetrics.title",
+        "performance",
+        perfContent,
+      );
+    }
+
+    // Artifacts
+    if (buildMetrics?.artifactMetrics) {
+      let artifactMd = `| ${this.t.t("artifactMetrics.metric")} | ${this.t.t("artifactMetrics.count")} | ${this.t.t("artifactMetrics.size")} |\n|---|---|---|\n`;
+      const { sourceArtifactsRead, outputArtifactsSeen, topLevelArtifacts } =
+        buildMetrics.artifactMetrics;
+      artifactMd += `| ${this.t.t("artifactMetrics.sourceRead")} | ${this.formatNumber(sourceArtifactsRead.count)} | ${this.formatBytes(sourceArtifactsRead.sizeInBytes)} |\n`;
+      artifactMd += `| ${this.t.t("artifactMetrics.outputSeen")} | ${this.formatNumber(outputArtifactsSeen.count)} | ${this.formatBytes(outputArtifactsSeen.sizeInBytes)} |\n`;
+      if (topLevelArtifacts)
+        artifactMd += `| ${this.t.t("artifactMetrics.topLevel")} | ${this.formatNumber(topLevelArtifacts.count)} | ${this.formatBytes(topLevelArtifacts.sizeInBytes)} |\n`;
+      html += renderSection(
+        "artifactMetrics.title",
+        "artifacts",
+        marked.parse(artifactMd),
+      );
+    }
+
+    // Build Graph
+    if (buildMetrics?.buildGraphMetrics) {
+      let graphMd = `| Metric | Value |\n|---|---|\n`;
+      const { actionCount, outputArtifactCount } =
+        buildMetrics.buildGraphMetrics;
+      graphMd += `| ${this.t.t("buildGraphMetrics.totalActions")} | ${this.formatNumber(actionCount)} |\n`;
+      graphMd += `| ${this.t.t("buildGraphMetrics.totalOutputs")} | ${this.formatNumber(outputArtifactCount)} |\n`;
+      html += renderSection(
+        "buildGraphMetrics.title",
+        "graph-metrics",
+        marked.parse(graphMd),
+      );
+    }
+
+    // Slowest Actions
+    let slowestMd = `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | ${this.t.t("slowestActions.outputTarget")} |\n|---|---|---|\n`;
+    actions
+      .sort(
+        (a, b) =>
+          parseInt(b.actionResult?.executionInfo.wallTimeMillis || "0", 10) -
+          parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10),
+      )
+      .slice(0, 10)
+      .forEach((a) => {
+        // --- START OF CRITICAL FIX ---
+        const outputTarget = a.primaryOutput?.uri || a.label;
+        slowestMd += `| ${this.formatDuration(parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(a.mnemonic)} | ${this.mdCode(outputTarget)} |\n`;
+        // --- END OF CRITICAL FIX ---
+      });
+    html += renderSection(
+      "slowestActions.title",
+      "slowest-actions",
+      marked.parse(slowestMd),
+    );
+
+    return html;
   }
 
-  private generateHtml(): string {
-    this.output = [];
+  private buildActionsTab(): string {
     const { actions } = this.data;
+    let html = "";
 
-    // Action Details section
-    const actionsToDetail =
-      this.data.actionDetails === "none"
-        ? [] // In 'none' mode, show no action details
-        : this.data.actionDetails === "failed"
-          ? actions.filter((a) => !a.success)
-          : actions;
-
-    if (actionsToDetail.length > 0) {
-      const title =
-        this.data.actionDetails === "all"
-          ? this.t.t("actionDetails.titleAll")
-          : this.t.t("actionDetails.titleFailed");
-      this.a(`<div id="action-details-wrapper">`);
-      this.a(`<h2 id="actions" data-nav-title="${title}">${title}</h2>`);
-
+    if (actions.length > 0) {
       const groupedActions = new Map<string, Action[]>();
-      actionsToDetail.forEach((action) => {
-        const key = action.label || "Unknown Label";
+      actions.forEach((a) => {
+        const key = a.label || "Unknown Label";
         if (!groupedActions.has(key)) groupedActions.set(key, []);
-        groupedActions.get(key)!.push(action);
+        groupedActions.get(key)!.push(a);
       });
 
-      groupedActions.forEach((actions, label) => {
-        const failedCount = actions.filter((a) => !a.success).length;
-        const groupData = {
-          label: label,
-          statusIcon: failedCount > 0 ? "❌" : "✔",
-          stats: {
-            actions: this.t.t("actionDetails.badgeActions", {
-              count: actions.length,
-            }),
-            failed: failedCount,
-            failedText: this.t.t("actionDetails.badgeFailed", {
-              count: failedCount,
-            }),
-            time: `${this.t.t("actionDetails.badgeTotalTime")}: ${this.formatDuration(actions.reduce((s, a) => s + parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10), 0))}`,
-          },
-        };
-
-        this.a(
-          `<action-group group-data='${this.escapeAttr(JSON.stringify(groupData))}'>`,
-        );
-        actions
+      groupedActions.forEach((actionList, label) => {
+        const failedCount = actionList.filter((a) => !a.success).length;
+        const hasFailures = failedCount > 0;
+        html += `<div class="action-group" data-label="${this.escapeAttr(label)}" data-failed="${hasFailures}">`;
+        html += `<div class="action-group-summary">`;
+        html += `<span class="icon">${hasFailures ? "❌" : "✔"}</span>`;
+        html += `<code class="label-code">${this.escapeAttr(label)}</code>`;
+        html += `<span class="action-group-stats">${actionList.length} actions, ${failedCount} failed</span>`;
+        html += `</div>`;
+        html += `<div class="action-group-content">`;
+        actionList
           .sort(
             (a, b) =>
               parseInt(
@@ -95,92 +238,161 @@ export class HtmlReporter {
           )
           .forEach((action) => {
             const command = action.argv || action.commandLine;
-            const rawStderr = action.stderrContent?.trim() || null;
-            const actionData = {
-              success: action.success,
-              mnemonic: action.mnemonic,
-              duration: this.formatDuration(
-                parseInt(
-                  action.actionResult?.executionInfo.wallTimeMillis || "0",
-                  10,
-                ),
-              ),
-              primaryOutput:
-                action.primaryOutput?.uri.replace("file://", "") ||
-                action.label ||
-                "N/A",
-              command: command ? command.join(" ") : null,
-              stderr: rawStderr ? this.ansiConverter.toHtml(rawStderr) : null,
-              cmdTitle: this.t.t("actionDetails.commandLine"),
-              stderrTitle: this.t.t("actionDetails.stderr"),
-            };
-            this.a(
-              `<action-item action-data='${this.escapeAttr(JSON.stringify(actionData))}'></action-item>`,
-            );
+            const stderr = action.stderrContent?.trim();
+            const output = (
+              action.primaryOutput?.uri ||
+              action.label ||
+              "N/A"
+            ).replace(/^file:\/\//, "");
+            html += `<details class="action-item" data-search-content="${this.escapeAttr(action.mnemonic)} ${this.escapeAttr(output)}"><summary>`;
+            html += `<span class="icon">${action.success ? "✅" : "❌"}</span>`;
+            html += `<strong>${this.escapeAttr(action.mnemonic)}</strong>`;
+            html += `<span class="duration">${this.formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10))}</span>`;
+            html += `<code class="output-code">${this.escapeAttr(output)}</code>`;
+            html += `</summary><div class="details-content">`;
+            if (command)
+              html += `<h4>${this.t.t("actionDetails.commandLine")}</h4><pre><code>${this.escapeAttr(command.join(" "))}</code></pre>`;
+            if (stderr)
+              html += `<h4>${this.t.t("actionDetails.stderr")}</h4><pre>${this.ansiConverter.toHtml(stderr)}</pre>`;
+            html += `</div></details>`;
           });
-        this.a(`</action-group>`);
+        html += `</div></div>`;
       });
-      this.a(
-        `<div id="no-results" style="display:none;">No actions match your filter.</div>`,
-      );
-      this.a(`</div>`);
     }
-
-    return this.output.join("");
+    return html;
   }
 
   public getReport(): string {
-    const body = this.generateHtml();
-    return this.template(this.t.t("buildSummary.title"), body);
+    if (!this.data.buildStarted || !this.data.buildFinished) {
+      return `Error: Build start or finish event not found.`;
+    }
+    const reportTabContent = this.buildReportTab();
+    const actionsTabContent = this.buildActionsTab();
+    return this.template(
+      this.t.t("buildSummary.title"),
+      reportTabContent,
+      actionsTabContent,
+    );
   }
 
-  private template(title: string, body: string): string {
-    const copyButtonText = this.t.t("actionDetails.copyButton");
-    const copiedButtonText = this.t.t("actionDetails.copiedButton");
+  private template(
+    title: string,
+    reportBody: string,
+    actionsBody: string,
+  ): string {
+    const searchPlaceholder = this.t.t("actionDetails.searchPlaceholder");
 
     return `<!DOCTYPE html><html lang="${this.t.lang}"><head><meta charset="UTF-8"><title>${title}</title><style>
-:root{--bg-color:#fff;--fg-color:#24292e;--bg-alt:#f6f8fa;--border-color:#e1e4e8;--accent-color:#0366d6;--danger-color:#d73a49;--danger-fg:#fff;--success-color:#28a745;--code-bg:rgba(27,31,35,.07);--shadow:0 1px 0 rgba(27,31,35,.04),inset 0 1px 0 hsla(0,0%,100%,.25)}
-html[data-theme='dark']{--bg-color:#0d1117;--fg-color:#c9d1d9;--bg-alt:#161b22;--border-color:#30363d;--accent-color:#58a6ff;--danger-color:#f85149;--danger-fg:#0d1117;--success-color:#3fb950;--code-bg:rgba(240,246,252,.15);--shadow:0 0 transparent}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;line-height:1.6;color:var(--fg-color);background-color:var(--bg-alt);margin:0; padding: 1rem;}
-.main-content{max-width: 1000px; margin: 0 auto; background-color: var(--bg-color); padding: 1rem 2rem; border-radius: 8px; box-shadow: var(--shadow)}
-h2{border-bottom:1px solid var(--border-color);padding-bottom:.5rem;margin-top:2rem}
-code{background-color:var(--code-bg);border-radius:6px;padding:.2em .4em;font-family:"SFMono-Regular",Consolas,monospace;font-size:85%}
-.stat-badge{padding:.25rem .75rem;border-radius:2em;font-size:.8em;font-weight:500;background-color:var(--code-bg);white-space:nowrap}
-.stat-badge.failed{background-color:var(--danger-color);color:var(--danger-fg)}
-.icon{width:1.2em;height:1.2em;vertical-align:-.2em;margin-right:.25em}
-.icon-success{color:var(--success-color)}
-.icon-danger{color:var(--danger-color)}
+:root{--header-height:60px;--bg-color:#fff;--fg-color:#24292e;--bg-alt:#f6f8fa;--border-color:#e1e4e8;--accent-color:#0366d6;}
+html[data-theme='dark']{--bg-color:#0d1117;--fg-color:#c9d1d9;--bg-alt:#161b22;--border-color:#30363d;--accent-color:#58a6ff;}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.5;color:var(--fg-color);background-color:var(--bg-alt);margin:0;}
+.page-header{display:flex;justify-content:space-between;align-items:center;padding:0 24px;height:var(--header-height);background:var(--bg-color);border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:100;}
+.header-left{flex:1;text-align:left}.header-center{flex:2;display:flex;justify-content:center}.header-right{flex:1;display:flex;justify-content:flex-end;gap:.5rem}
+#action-search{width:100%;max-width:500px;font-size:1rem;padding:.5rem 1rem;border:1px solid var(--border-color);border-radius:6px;}
+.filter-btn{font-size:.9rem;padding:.5rem 1rem;border:1px solid var(--border-color);border-radius:6px;background:0;cursor:pointer}
+.filter-btn.active{background:var(--accent-color);color:#fff;border-color:var(--accent-color)}
+.tab-bar{display:flex;border-bottom:1px solid var(--border-color);background:var(--bg-color);padding:0 24px}
+.tab-btn{padding:1rem 1.5rem;cursor:pointer;border:0;border-bottom:3px solid transparent;background:0;font-size:1rem;color:var(--fg-color)}
+.tab-btn.active{border-bottom-color:var(--accent-color);font-weight:600}
+.tab-content{display:none;padding:24px}.tab-content.active{display:block}
+.report-section > h2{margin:2rem 0 1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border-color)}.report-section:first-child > h2{margin-top:0}
+details > summary { list-style: none; cursor: pointer; } details > summary::-webkit-details-marker { display: none; }
+table{border-collapse:collapse;width:100%;margin:1rem 0}
+th,td{border:1px solid var(--border-color);padding:.6em 1em;text-align:left;vertical-align:top}
+th{background-color:var(--bg-alt)}
+pre{background-color:var(--bg-alt);border-radius:6px;padding:1rem;white-space:pre-wrap;word-break:break-all;overflow-x:auto;}
+code{font-family:monospace;background-color:rgba(27,31,35,.07);border-radius:6px;padding:.2em .4em;font-size:85%}
+pre>code{padding:0;background:0;border:0}
+.action-group{border:1px solid var(--border-color);border-radius:8px;margin-bottom:4px;overflow:hidden}
+.action-group-summary{display:flex;gap:.75rem;align-items:center;padding:.5rem 1rem;cursor:pointer;background:var(--bg-alt)}
+.action-group-summary:hover{background-color:var(--border-color)}
+.action-group-summary > .icon{font-size:1.2em;flex-shrink:0}
+.action-group-summary > .label-code{flex-grow:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.action-group-stats{flex-shrink:0;margin-left:auto;font-size:.85rem;color:#6a737d}
+.action-group-content{padding:.25rem .5rem;display:none;border-top:1px solid var(--border-color)}
+.action-item summary{display:flex;gap:.75rem;align-items:center;cursor:pointer;padding:.4rem .5rem}
+.action-item summary > .icon{flex-shrink:0}
+.action-item summary > strong{flex-shrink:0}
+.action-item summary > .duration{color:#6a737d}
+.action-item summary > .output-code{flex-grow:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.details-content{padding:.5rem 1rem 1rem 2.5rem;border-top:1px dashed var(--border-color);margin-top:.25rem}
 </style></head><body>
-<main class="main-content" id="main-content">${body}</main>
-<template id="action-group-template">
-  <style>
-    :host{display:block}
-    .action-group{border:1px solid var(--border-color);border-radius:8px;margin-bottom:1.5rem;box-shadow:var(--shadow)}
-    .action-group-header{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1.25rem;background-color:var(--bg-alt);border-bottom:1px solid var(--border-color);gap:1rem}
-    .header-label{font-size:1.1em;font-weight:600;display:flex;align-items:center;gap:.5rem;flex-shrink:1;min-width:0}
-    .header-label .status-icon{flex-shrink:0}
-    .header-label .label-repo{color:var(--accent-color);font-weight:400;flex-shrink:0}
-    .header-label .label-path{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .header-stats{display:flex;align-items:center;gap:.5rem;flex-shrink:0}
-    .action-group-content{padding:1rem;padding-top:.5rem}
-  </style>
-  <div class="action-group">
-    <div class="action-group-header">
-      <div class="header-label"></div>
-      <div class="header-stats"></div>
+<header class="page-header">
+    <div class="header-left"><h1 class="header-title">${title}</h1></div>
+    <div class="header-center"><input type="text" id="action-search" placeholder="${searchPlaceholder}" style="display:none;"></div>
+    <div class="header-right">
+        <button class="filter-btn" data-filter="all" style="display:none;">All Actions</button>
+        <button class="filter-btn" data-filter="failed" style="display:none;">Failed Actions</button>
     </div>
-    <div class="action-group-content"><slot></slot></div>
-  </div>
-</template>
-<template id="action-item-template"><style>:host{display:block}details{border:1px solid var(--border-color);border-radius:6px;margin-bottom:.5rem;background-color:var(--bg-color);overflow:hidden;transition:box-shadow .2s}details:hover{box-shadow:0 4px 6px -1px rgba(0,0,0,.01),0 2px 4px -2px rgba(0,0,0,.01)}summary{font-weight:500;padding:.75rem 1rem;background-color:var(--bg-alt);outline:0;display:flex;align-items:center;gap:.75rem;cursor:pointer;list-style:none}summary::-webkit-details-marker{display:none}.content{padding:1rem;border-top:1px solid var(--border-color)}code{font-size:85%}.icon-wrapper{display:flex;align-items:center}</style><details><summary><span class="icon-wrapper" id="status-icon"></span><strong id="mnemonic"></strong>|<span id="duration"></span>|<code id="output"></code></summary><div class="content"><slot></slot></div></details></template>
-<template id="code-block-template"><style>:host{display:block;margin-top:1rem}.code-block-wrapper{position:relative;margin-top:.5rem}.title{color:var(--fg-color);font-weight:600;display:block;margin-bottom:.5rem}pre{background-color:var(--bg-alt);border:1px solid var(--border-color);border-radius:6px;padding:16px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}</style><div class="code-block-wrapper"><span class="title"></span><pre><slot></slot></pre><copy-button></copy-button></div></template>
-<template id="copy-button-template"><style>:host{position:absolute;top:8px;right:8px}.copy-btn{background-color:var(--bg-color);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;opacity:0;transition:opacity .2s,background-color .2s,color .2s}*:hover>.copy-btn,*:focus-within>.copy-btn{opacity:1}.copy-btn.copied{background-color:var(--success-color);color:white;border-color:var(--success-color)}</style><button class="copy-btn">${copyButtonText}</button></template>
+</header>
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="report">Report</button>
+    <button class="tab-btn" data-tab="actions">Action Details</button>
+</div>
+<main>
+    <div id="tab-report" class="tab-content active">${reportBody}</div>
+    <div id="tab-actions" class="tab-content">${actionsBody}</div>
+</main>
 <script>
-document.addEventListener('DOMContentLoaded',()=>{const define=(n,c)=>{if(!customElements.get(n))customElements.define(n,c)};
-class CopyButton extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'})}connectedCallback(){const t=document.getElementById('copy-button-template').content;this.shadowRoot.appendChild(t.cloneNode(true));this.button=this.shadowRoot.querySelector('button');this.button.addEventListener('click',this.copy.bind(this))}async copy(){const t=this.parentElement.querySelector('pre,code').innerText;try{await navigator.clipboard.writeText(t);this.button.textContent='${copiedButtonText}';this.button.classList.add('copied');setTimeout(()=>{this.button.textContent='${copyButtonText}';this.button.classList.remove('copied')},2e3)}catch(t){console.error("Copy failed",t)}}};define('copy-button',CopyButton);
-class CodeBlock extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'})}connectedCallback(){const t=document.getElementById('code-block-template').content;this.shadowRoot.appendChild(t.cloneNode(true));this.shadowRoot.querySelector('.title').textContent=this.getAttribute('title');this.shadowRoot.querySelector('slot').innerHTML=this.innerHTML}};define('code-block',CodeBlock);
-class ActionItem extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'})}connectedCallback(){const t=document.getElementById('action-item-template').content;this.shadowRoot.appendChild(t.cloneNode(true));const e=JSON.parse(this.getAttribute('action-data'));const s=this.shadowRoot.querySelector('#status-icon');s.innerHTML=e.success?'<svg class="icon icon-success" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/></svg>':'<svg class="icon icon-danger" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.647a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>';this.shadowRoot.querySelector('#mnemonic').textContent=e.mnemonic;this.shadowRoot.querySelector('#duration').textContent=e.duration;this.shadowRoot.querySelector('#output').textContent=e.primaryOutput;if(e.command){const o=document.createElement('code-block');o.setAttribute('title',e.cmdTitle);o.textContent=e.command;this.shadowRoot.querySelector('.content').appendChild(o)}if(e.stderr){const o=document.createElement('code-block');o.setAttribute('title',e.stderrTitle);o.innerHTML=e.stderr;this.shadowRoot.querySelector('.content').appendChild(o)}}};define('action-item',ActionItem);
-class ActionGroup extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'})}connectedCallback(){const t=document.getElementById('action-group-template').content;this.shadowRoot.appendChild(t.cloneNode(true));const e=JSON.parse(this.getAttribute('group-data'));const labelEl=this.shadowRoot.querySelector('.header-label');const statusIconEl = e.statusIcon === '✔' ? '<svg class="icon icon-success" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/></svg>' : '<svg class="icon icon-danger" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.647a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>';const match=e.label.match(/^(@@?[^\\\\/]+)(\\/\\/.*)/);if(match){labelEl.innerHTML='<span class="status-icon">'+statusIconEl+'</span><span class="label-repo">'+match[1]+'</span><span class="label-path">'+match[2]+'</span>'}else{labelEl.innerHTML='<span class="status-icon">'+statusIconEl+'</span><span class="label-path">'+e.label+'</span>'}const o=this.shadowRoot.querySelector('.header-stats');o.innerHTML='<span class="stat-badge">'+e.stats.actions+'</span>'+(e.stats.failed>0?'<span class="stat-badge failed">'+e.stats.failedText+'</span>':'')+'<span class="stat-badge">'+e.stats.time+'</span>';this.shadowRoot.querySelector('slot').innerHTML=this.innerHTML}};define('action-group',ActionGroup);
+document.addEventListener('DOMContentLoaded',()=>{
+    const tabs = document.querySelectorAll('.tab-btn');
+    const contents = document.querySelectorAll('.tab-content');
+    const searchInput = document.getElementById('action-search');
+    const filterButtons = document.querySelectorAll('.filter-btn');
+
+    const switchTab = (tabId) => {
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+        contents.forEach(c => c.classList.toggle('active', c.id === \`tab-\${tabId}\`));
+        const isActionsTab = tabId === 'actions';
+        searchInput.style.display = isActionsTab ? 'block' : 'none';
+        filterButtons.forEach(b => b.style.display = isActionsTab ? 'block' : 'none');
+    };
+
+    tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+
+    const actionGroups = document.querySelectorAll('.action-group');
+    const filterState = { query: '', view: 'all' };
+
+    const applyFilters = () => {
+        const query = filterState.query.toLowerCase();
+        actionGroups.forEach(group => {
+            const hasFailures = group.dataset.failed === 'true';
+            const showByView = filterState.view === 'all' || (filterState.view === 'failed' && hasFailures);
+
+            let matchCount = 0;
+            const items = group.querySelectorAll('.action-item');
+            items.forEach(item => {
+                const searchContent = item.dataset.searchContent.toLowerCase();
+                const showByQuery = !query || searchContent.includes(query);
+                item.style.display = showByQuery ? '' : 'none';
+                if(showByQuery) matchCount++;
+            });
+
+            group.style.display = showByView && (matchCount > 0) ? '' : 'none';
+        });
+    };
+
+    filterButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filterState.view = btn.dataset.filter;
+            applyFilters();
+        });
+    });
+    if (filterButtons.length > 0) filterButtons[0].classList.add('active');
+
+    searchInput.addEventListener('input', e => {
+        filterState.query = e.target.value;
+        applyFilters();
+    });
+
+    document.querySelectorAll('.action-group-summary').forEach(summary => {
+        summary.addEventListener('click', () => {
+            const content = summary.nextElementSibling;
+            content.style.display = content.style.display === 'block' ? 'none' : 'block';
+        });
+    });
 });
 </script></body></html>`;
   }
