@@ -11,7 +11,9 @@
     "start": "ts-node src/index.ts",
     "simulate": "ts-node src/simulator.ts",
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "proto:sync": "node scripts/sync-protos.js",
+    "proto:gen-ts": "protoc --plugin=protoc-gen-ts_proto=$(pwd)/node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=src/proto/generated --ts_proto_opt=esModuleInterop=true,forceLong=string,outputServices=false -I proto $(find proto -type f -name '*.proto')"
   },
   "keywords": [
     "bazel",
@@ -37,7 +39,9 @@
     "@types/node": "^20.8.4",
     "@types/tail": "^2.2.1",
     "@types/yargs": "^17.0.28",
+    "protoc-gen-ts": "^0.8.7",
     "ts-node": "^10.9.1",
+    "ts-proto": "^2.7.5",
     "typescript": "^5.2.2"
   }
 }
