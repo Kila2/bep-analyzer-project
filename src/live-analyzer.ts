@@ -30,17 +30,17 @@ interface ProgressInfo {
   total: number;
   runningActions: { name: string; duration: string }[];
   logs: string[];
+  currentLabel?: string;
 }
 
 function parseProgress(text: string): ProgressInfo {
-  // Bazel's progress stderr can contain multiple blocks separated by cursor movement codes.
-  // We only care about the last, most up-to-date block.
   const blocks = text.split(/\r\u001b\[1A\u001b\[K/);
   const lastBlock = blocks[blocks.length - 1];
 
   const lines = lastBlock.split("\n");
   let completed = 0;
   let total = 0;
+  let currentLabel: string | undefined;
   const runningActions: { name: string; duration: string }[] = [];
   const logs: string[] = [];
 
@@ -52,6 +52,12 @@ function parseProgress(text: string): ProgressInfo {
     if (progressMatch) {
       completed = parseInt(progressMatch[1].replace(/,/g, ""), 10);
       total = parseInt(progressMatch[2].replace(/,/g, ""), 10);
+      const labelMatch = strippedLine.match(
+        /\]\s+(?:Building|Compiling|Executing|Linking|Testing|Action)\s+(.+)/,
+      );
+      if (labelMatch) {
+        currentLabel = labelMatch[1].split(";")[0].trim();
+      }
       continue;
     }
 
@@ -64,7 +70,6 @@ function parseProgress(text: string): ProgressInfo {
       continue;
     }
 
-    // For live analysis, only show explicit warnings/errors to avoid layout clutter.
     if (
       strippedLine.toLowerCase().includes("warning:") ||
       strippedLine.toLowerCase().includes("error:")
@@ -77,8 +82,10 @@ function parseProgress(text: string): ProgressInfo {
     (a, b) => parseInt(b.duration, 10) - parseInt(a.duration, 10),
   );
 
-  return { completed, total, runningActions, logs };
+  return { completed, total, runningActions, logs, currentLabel };
 }
+
+export type LiveDisplayMode = "dashboard" | "vscode-log" | "vscode-status";
 
 export class LiveBepAnalyzer extends StaticBepAnalyzer {
   private progressText: string = "Initializing...";
@@ -89,20 +96,21 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   private spinnerIndex = 0;
   private recentLogs: string[] = [];
   private dashboardStartTime: number = 0;
-  // --- State persistence to prevent flicker ---
   private lastProgressTotal: number = 0;
   private lastProgressCompleted: number = 0;
+  private lastCurrentLabel: string | undefined;
 
   constructor(
     actionDetails: "none" | "failed" | "all" = "failed",
     wideLevel: number = 0,
+    private readonly displayMode: LiveDisplayMode = "dashboard",
   ) {
     super(actionDetails, wideLevel);
   }
 
   public tailFile(filePath: string): Promise<void> {
     this.dashboardStartTime = Date.now();
-    if (!fs.existsSync(filePath)) {
+    if (!fs.existsSync(filePath) && this.displayMode === "dashboard") {
       console.log(
         chalk.yellow(`Waiting for file to be created: ${filePath}...`),
       );
@@ -121,7 +129,9 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
 
       tail.on("error", (error: any) => {
         this.stop();
-        console.error(chalk.red("Error reading file:"), error);
+        if (this.displayMode !== "vscode-log") {
+          console.error(chalk.red("Error reading file:"), error);
+        }
         reject(error);
       });
 
@@ -129,8 +139,14 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
         if (this.isFinished) {
           this.stop();
           if (tail.unwatch) tail.unwatch();
-          this.renderLiveUpdate();
-          logUpdate.done();
+          // Final render call for modes that need it
+          if (this.displayMode === "vscode-status") {
+            this.renderVscodeStatus();
+            logUpdate.done();
+          } else if (this.displayMode === "dashboard") {
+            this.renderLiveUpdate();
+            logUpdate.done();
+          }
           clearInterval(checkFinished);
           resolve();
         }
@@ -139,9 +155,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   }
 
   private addRecentLog(log: string) {
-    if (this.recentLogs[this.recentLogs.length - 1] === log) {
-      return;
-    }
+    if (this.recentLogs[this.recentLogs.length - 1] === log) return;
     this.recentLogs.push(log);
     while (this.recentLogs.length > 5) {
       this.recentLogs.shift();
@@ -149,17 +163,40 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   }
 
   protected processEvent(event: BepEvent): void {
-    super.processEvent(event); // This still populates the static data
+    super.processEvent(event);
+
     const id = event.id;
     const data = event.payload || event;
 
     if (id.buildStarted || id.started) {
-      if (!this.timer) {
-        this.startTimer();
+      if (!this.timer) this.startTimer();
+      if (this.displayMode === "vscode-log" && data.started) {
+        console.log(`[START] Build started. Command: ${data.started.command}`);
+        console.log(`---`);
       }
     } else if (id.actionCompleted) {
       const lastAction = this.actions[this.actions.length - 1];
-      if (lastAction) {
+      if (lastAction && this.displayMode === "vscode-log") {
+        const duration = parseInt(
+          lastAction.actionResult?.executionInfo.wallTimeMillis || "0",
+          10,
+        );
+        const status = lastAction.success ? "SUCCESS" : "FAILURE";
+
+        console.log(
+          `[ACTION] ${status} | ${lastAction.mnemonic} | ${formatDuration(duration)} | ${lastAction.label}`,
+        );
+        if (lastAction.argv) {
+          console.log(`  CMD: ${lastAction.argv.join(" ")}`);
+        }
+        if (!lastAction.success && lastAction.stderrContent) {
+          console.log(
+            `  STDERR:\n${stripAnsi(lastAction.stderrContent).trim()}`,
+          );
+        }
+        console.log(`---`);
+      }
+      if (lastAction && this.displayMode === "dashboard") {
         if (lastAction.success) {
           this.addRecentLog(`${chalk.green("✔")} ${lastAction.label}`);
         } else if (this.actionDetails !== "none") {
@@ -168,45 +205,45 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
               `❌ FAILED: ${lastAction.mnemonic} ${lastAction.label}`,
             ),
           );
-          if (lastAction.stderrContent) {
-            const stderrLines = stripAnsi(lastAction.stderrContent)
-              .trim()
-              .split("\n")
-              .slice(0, 3);
-            stderrLines.forEach((line) =>
-              this.addRecentLog(chalk.red(`  ${line}`)),
-            );
-            if (lastAction.stderrContent.trim().split("\n").length > 3) {
-              this.addRecentLog(
-                chalk.red("  ... (Full stderr in final report)"),
-              );
-            }
-          }
         }
       }
     } else if (id.problem) {
-      const problemMsg = `Problem: ${data.problem?.message.split("\n")[0]}`;
-      this.addRecentLog(chalk.red(problemMsg));
+      if (this.displayMode === "vscode-log" && data.problem) {
+        console.log(`[PROBLEM] ${data.problem.message.trim()}`);
+        console.log(`---`);
+      }
+      if (this.displayMode === "dashboard" && data.problem) {
+        const problemMsg = `Problem: ${data.problem.message.split("\n")[0]}`;
+        this.addRecentLog(chalk.red(problemMsg));
+      }
     } else if (id.progress) {
       this.progressText = data.progress?.stderr || data.progress?.stdout || "";
       const parsed = parseProgress(this.progressText);
 
-      // --- CORRECTED LOGIC ---
-      // Atomically update progress state only when a valid total is found.
-      // This prevents resetting 'completed' to 0 when a progress event
-      // without the [x/y] string arrives.
       if (parsed.total > 0 && parsed.completed >= 0) {
         this.lastProgressTotal = parsed.total;
         this.lastProgressCompleted = parsed.completed;
       }
+      if (parsed.currentLabel) this.lastCurrentLabel = parsed.currentLabel;
 
-      parsed.logs.forEach((log) => {
-        if (stripAnsi(log).trim()) {
-          this.addRecentLog(`  ${log}`);
-        }
-      });
+      if (this.displayMode === "dashboard") {
+        parsed.logs.forEach((log) => {
+          if (stripAnsi(log).trim()) this.addRecentLog(`  ${log}`);
+        });
+      }
     } else if (id.buildFinished || id.finished) {
       this.isFinished = true;
+      if (this.displayMode === "vscode-log" && data.finished) {
+        const finishTime = parseInt(data.finished.finishTimeMillis, 10);
+        const startTime = this.buildStarted
+          ? parseInt(this.buildStarted.startTimeMillis, 10)
+          : 0;
+        const totalTime =
+          startTime > 0 ? formatDuration(finishTime - startTime) : "N/A";
+        console.log(
+          `[FINISH] ${data.finished.overallSuccess ? "SUCCESS" : "FAILURE"} | Total Time: ${totalTime}`,
+        );
+      }
     }
   }
 
@@ -214,10 +251,21 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     if (this.timer) return;
     this.timer = setInterval(() => {
       if (!this.isFinished) {
-        const duration = Date.now() - this.dashboardStartTime;
-        this.runningTime = formatDuration(duration);
         this.spinnerIndex = (this.spinnerIndex + 1) % this.spinner.length;
-        this.renderLiveUpdate();
+
+        // --- CORRECTED LOGIC ---
+        // Only run render loops for the modes that need them.
+        // 'vscode-log' does NOT need a render loop.
+        switch (this.displayMode) {
+          case "vscode-status":
+            this.renderVscodeStatus();
+            break;
+          case "dashboard":
+            const duration = Date.now() - this.dashboardStartTime;
+            this.runningTime = formatDuration(duration);
+            this.renderLiveUpdate();
+            break;
+        }
       } else {
         clearInterval(this.timer!);
         this.timer = null;
@@ -231,6 +279,31 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
       this.timer = null;
     }
     this.isFinished = true;
+  }
+
+  private renderVscodeStatus() {
+    let status = `$(sync~spin) RUNNING`;
+    let topActionInfo = "";
+
+    if (this.isFinished && this.buildFinished) {
+      status = this.buildFinished.overallSuccess
+        ? `$(check) SUCCESS`
+        : `$(error) FAILURE`;
+    } else {
+      const progressInfo = parseProgress(this.progressText);
+      if (progressInfo.runningActions.length > 0) {
+        topActionInfo = `| ${progressInfo.runningActions[0].name}`;
+      }
+    }
+
+    const progress =
+      this.lastProgressTotal > 0
+        ? `[${this.lastProgressCompleted}/${this.lastProgressTotal}]`
+        : "";
+
+    const label = this.lastCurrentLabel ? `| ${this.lastCurrentLabel}` : "";
+
+    logUpdate(`${status} ${progress} ${label} ${topActionInfo}`);
   }
 
   public renderLiveUpdate(): void {
@@ -255,10 +328,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     output.push(chalk.bold.cyan("--- Real-Time Build Dashboard ---"));
     output.push(`${statusLine}  |  Elapsed Time: ${chalk.yellow(totalTime)}`);
 
-    const progressInfo = parseProgress(this.progressText);
-
     if (!this.isFinished) {
-      // --- Overall Progress Bar (uses persistent state) ---
       if (this.lastProgressTotal > 0) {
         const percent = Math.floor(
           (this.lastProgressCompleted / this.lastProgressTotal) * 100,
@@ -270,23 +340,18 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           ),
         );
       } else {
-        // Add a placeholder line to prevent layout shifting
         output.push(" ");
       }
 
-      // --- Running Actions Section (always visible to prevent flicker) ---
       output.push("");
       output.push(chalk.bold.cyan("--- Running Actions ---"));
 
       let runningActionColWidths: (number | null)[];
       if (this.wideLevel >= 2) {
-        // for -ww, use a very large fixed width
         runningActionColWidths = [200, 10];
       } else if (this.wideLevel === 1) {
-        // for -w
         runningActionColWidths = [120, 10];
       } else {
-        // default
         runningActionColWidths = [70, 10];
       }
 
@@ -296,10 +361,9 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
       });
 
       const maxActionsToShow = 5;
-      const actionsToDisplay = progressInfo.runningActions.slice(
-        0,
-        maxActionsToShow,
-      );
+      const actionsToDisplay = parseProgress(
+        this.progressText,
+      ).runningActions.slice(0, maxActionsToShow);
 
       for (let i = 0; i < maxActionsToShow; i++) {
         const action = actionsToDisplay[i];
@@ -309,22 +373,17 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
             chalk.yellow(action.duration),
           ]);
         } else {
-          // Add a blank row to maintain a fixed table height
           runningActionsTable.push(["", ""]);
         }
       }
       output.push(runningActionsTable.toString());
 
-      // --- Recent Activity Section (always visible with fixed height) ---
       output.push("");
       output.push(chalk.bold.cyan("--- Recent Activity ---"));
 
       const maxLogsToShow = 5;
-      const displayLogs = [...this.recentLogs]; // Create a copy
-
-      // Pad with blank lines to ensure a fixed height for this section
+      const displayLogs = [...this.recentLogs];
       while (displayLogs.length < maxLogsToShow) {
-        // Use a non-empty string that renders as blank space to ensure the line is created
         displayLogs.unshift(" ");
       }
 
@@ -333,7 +392,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
 
       displayLogs.forEach((log) => {
         if (log.trim() === "") {
-          output.push(log); // Push the blank line
+          output.push(log);
           return;
         }
         if (maxWidth === Infinity) {
@@ -341,11 +400,11 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           return;
         }
         const cleanLog = stripAnsi(log);
-        if (cleanLog.length > maxWidth) {
-          output.push(`${cleanLog.substring(0, maxWidth - 3)}...`);
-        } else {
-          output.push(log);
-        }
+        output.push(
+          cleanLog.length > maxWidth
+            ? `${cleanLog.substring(0, maxWidth - 3)}...`
+            : log,
+        );
       });
     }
 
