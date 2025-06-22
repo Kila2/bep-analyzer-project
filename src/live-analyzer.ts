@@ -245,6 +245,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     const progressInfo = parseProgress(this.progressText);
 
     if (!this.isFinished) {
+      // Overall Progress Bar (always shows if data is available)
       if (progressInfo.total > 0 && progressInfo.completed >= 0) {
         const percent = Math.floor(
           (progressInfo.completed / progressInfo.total) * 100,
@@ -257,44 +258,66 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
         );
       }
 
-      if (progressInfo.runningActions.length > 0) {
-        output.push("");
-        output.push(chalk.bold.cyan("--- Running Actions ---"));
-        const table = new Table({
-          colWidths: [70, 10],
-          style: {
-            head: [],
-            border: [],
-            "padding-left": 0,
-            "padding-right": 0,
-          },
-        });
-        progressInfo.runningActions.slice(0, 5).forEach((action) => {
-          table.push([chalk.gray(action.name), chalk.yellow(action.duration)]);
-        });
-        output.push(table.toString());
+      // --- Running Actions Section (always visible to prevent flicker) ---
+      output.push("");
+      output.push(chalk.bold.cyan("--- Running Actions ---"));
+      const runningActionsTable = new Table({
+        colWidths: [70, 10],
+        style: { head: [], border: [], "padding-left": 0, "padding-right": 0 },
+      });
+
+      const maxActionsToShow = 5;
+      const actionsToDisplay = progressInfo.runningActions.slice(
+        0,
+        maxActionsToShow,
+      );
+
+      for (let i = 0; i < maxActionsToShow; i++) {
+        const action = actionsToDisplay[i];
+        if (action) {
+          runningActionsTable.push([
+            chalk.gray(action.name),
+            chalk.yellow(action.duration),
+          ]);
+        } else {
+          // Add a blank row to maintain a fixed table height
+          runningActionsTable.push(["", ""]);
+        }
+      }
+      output.push(runningActionsTable.toString());
+
+      // --- Recent Activity Section (always visible with fixed height) ---
+      output.push("");
+      output.push(chalk.bold.cyan("--- Recent Activity ---"));
+
+      const maxLogsToShow = 5;
+      const displayLogs = [...this.recentLogs]; // Create a copy
+
+      // Pad with blank lines to ensure a fixed height for this section
+      while (displayLogs.length < maxLogsToShow) {
+        // Use a non-empty string that renders as blank space to ensure the line is created
+        displayLogs.unshift(" ");
       }
 
-      if (this.recentLogs.length > 0) {
-        output.push("");
-        output.push(chalk.bold.cyan("--- Recent Activity ---"));
+      const maxWidth =
+        this.wideLevel >= 2 ? Infinity : this.wideLevel === 1 ? 150 : 90;
 
-        const maxWidth =
-          this.wideLevel >= 2 ? Infinity : this.wideLevel === 1 ? 150 : 90;
-
-        this.recentLogs.forEach((log) => {
-          if (maxWidth === Infinity) {
-            output.push(log);
-            return;
-          }
-          const cleanLog = stripAnsi(log);
-          if (cleanLog.length > maxWidth) {
-            output.push(`${cleanLog.substring(0, maxWidth - 3)}...`);
-          } else {
-            output.push(log);
-          }
-        });
-      }
+      displayLogs.forEach((log) => {
+        if (log.trim() === "") {
+          output.push(log); // Push the blank line
+          return;
+        }
+        if (maxWidth === Infinity) {
+          output.push(log);
+          return;
+        }
+        const cleanLog = stripAnsi(log);
+        if (cleanLog.length > maxWidth) {
+          output.push(`${cleanLog.substring(0, maxWidth - 3)}...`);
+        } else {
+          output.push(log);
+        }
+      });
     }
 
     logUpdate(output.join("\n"));
