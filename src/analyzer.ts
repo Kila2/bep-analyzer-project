@@ -129,7 +129,8 @@ export class StaticBepAnalyzer {
         const actionData = data.completed || data.action;
         if (actionData) {
           const action = actionData as Action;
-          action.label = id.actionCompleted!.label;
+          action.label =
+            id.actionCompleted!.label || id.actionCompleted!.primaryOutput;
           if (id.actionCompleted!.primaryOutput) {
             action.primaryOutput = {
               uri: `file://${id.actionCompleted!.primaryOutput}`,
