@@ -89,6 +89,9 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   private spinnerIndex = 0;
   private recentLogs: string[] = [];
   private dashboardStartTime: number = 0;
+  // --- State persistence to prevent flicker ---
+  private lastProgressTotal: number = 0;
+  private lastProgressCompleted: number = 0;
 
   constructor(
     actionDetails: "none" | "failed" | "all" = "failed",
@@ -187,6 +190,16 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     } else if (id.progress) {
       this.progressText = data.progress?.stderr || data.progress?.stdout || "";
       const parsed = parseProgress(this.progressText);
+
+      // --- CORRECTED LOGIC ---
+      // Atomically update progress state only when a valid total is found.
+      // This prevents resetting 'completed' to 0 when a progress event
+      // without the [x/y] string arrives.
+      if (parsed.total > 0 && parsed.completed >= 0) {
+        this.lastProgressTotal = parsed.total;
+        this.lastProgressCompleted = parsed.completed;
+      }
+
       parsed.logs.forEach((log) => {
         if (stripAnsi(log).trim()) {
           this.addRecentLog(`  ${log}`);
@@ -245,24 +258,40 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     const progressInfo = parseProgress(this.progressText);
 
     if (!this.isFinished) {
-      // Overall Progress Bar (always shows if data is available)
-      if (progressInfo.total > 0 && progressInfo.completed >= 0) {
+      // --- Overall Progress Bar (uses persistent state) ---
+      if (this.lastProgressTotal > 0) {
         const percent = Math.floor(
-          (progressInfo.completed / progressInfo.total) * 100,
+          (this.lastProgressCompleted / this.lastProgressTotal) * 100,
         );
         const bar = renderProgressBar(percent, 30);
         output.push(
           chalk.bold(
-            `Overall Progress: [${bar}] ${percent}% (${progressInfo.completed.toLocaleString()}/${progressInfo.total.toLocaleString()})`,
+            `Overall Progress: [${bar}] ${percent}% (${this.lastProgressCompleted.toLocaleString()}/${this.lastProgressTotal.toLocaleString()})`,
           ),
         );
+      } else {
+        // Add a placeholder line to prevent layout shifting
+        output.push(" ");
       }
 
       // --- Running Actions Section (always visible to prevent flicker) ---
       output.push("");
       output.push(chalk.bold.cyan("--- Running Actions ---"));
+
+      let runningActionColWidths: (number | null)[];
+      if (this.wideLevel >= 2) {
+        // for -ww, use a very large fixed width
+        runningActionColWidths = [200, 10];
+      } else if (this.wideLevel === 1) {
+        // for -w
+        runningActionColWidths = [120, 10];
+      } else {
+        // default
+        runningActionColWidths = [70, 10];
+      }
+
       const runningActionsTable = new Table({
-        colWidths: [70, 10],
+        colWidths: runningActionColWidths,
         style: { head: [], border: [], "padding-left": 0, "padding-right": 0 },
       });
 
