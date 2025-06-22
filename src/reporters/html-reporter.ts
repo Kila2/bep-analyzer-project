@@ -138,8 +138,16 @@ export class HtmlReporter {
 
     if (workspaceStatus && workspaceStatus.item.length > 0) {
       let wsMd = `| Key | Value |\n|---|---|\n`;
+      const timestampItem = workspaceStatus.item.find(
+        (item) => item.key === "BUILD_TIMESTAMP",
+      );
       workspaceStatus.item.forEach((item) => {
-        wsMd += `| ${this.mdCode(item.key)} | ${this.mdCode(item.value)} |\n`;
+        let value = item.value;
+        if (item.key === "FORMATTED_DATE" && timestampItem) {
+          const timestamp = parseInt(timestampItem.value, 10) * 1000;
+          value = this.formatDate(timestamp, this.t.getLanguage());
+        }
+        wsMd += `| ${this.mdCode(item.key)} | ${this.mdCode(value)} |\n`;
       });
       envContent += marked.parse(wsMd);
     }
@@ -735,7 +743,7 @@ pre > code { padding: 0; background: 0; border: 0; }
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-align: right;
+    text-align: left;
     font-size: .9em;
 }
 .details-content {

@@ -152,8 +152,19 @@ export class TerminalReporter {
       ]);
     }
     if (workspaceStatus) {
+      const timestampItem = workspaceStatus.item.find(
+        (item) => item.key === "BUILD_TIMESTAMP",
+      );
       workspaceStatus.item.forEach((item) => {
-        envTable.push([item.key, chalk.gray(item.value || "")]);
+        if (item.key === "FORMATTED_DATE" && timestampItem) {
+          const timestamp = parseInt(timestampItem.value, 10) * 1000;
+          envTable.push([
+            item.key,
+            chalk.gray(formatDate(timestamp, this.t.getLanguage())),
+          ]);
+        } else {
+          envTable.push([item.key, chalk.gray(item.value || "")]);
+        }
       });
     }
     if (envTable.length > 1) console.log(envTable.toString());
