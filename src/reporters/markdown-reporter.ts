@@ -71,8 +71,8 @@ class MarkdownBuilder {
     this.a();
   }
 
-  private h3(titleKey: string): void {
-    this.a(`### ${this.t.t(titleKey)}`);
+  private h3(title: string): void {
+    this.a(`### ${title}`);
     this.a();
   }
 
@@ -183,7 +183,7 @@ class MarkdownBuilder {
       optionsParsed?.explicitCmdLine &&
       optionsParsed.explicitCmdLine.length > 0
     ) {
-      this.h3("buildEnv.explicitOptions");
+      this.h3(this.t.t("buildEnv.explicitOptions"));
       this.a("```");
       optionsParsed.explicitCmdLine.forEach((opt) => this.a(opt));
       this.a("```");
@@ -198,7 +198,7 @@ class MarkdownBuilder {
             [],
         )
         .join(" ");
-      this.h3("buildEnv.canonicalCommandLine");
+      this.h3(this.t.t("buildEnv.canonicalCommandLine"));
       this.a("```sh");
       this.a(cmd);
       this.a("```");
@@ -213,7 +213,6 @@ class MarkdownBuilder {
     this.h2("performanceMetrics.title");
     this.a("| Metric | Value |");
     this.a("|---|---|");
-    this.a(`| **${this.t.t("performanceMetrics.executionCaching")}** | |`);
     this.a(
       `| ${this.t.t("performanceMetrics.actionsCreated")} | ${this.formatNumber(buildMetrics.actionSummary.actionsCreated || "N/A")} |`,
     );
@@ -238,7 +237,6 @@ class MarkdownBuilder {
       );
     }
     if (buildMetrics.memoryMetrics) {
-      this.a(`| **${this.t.t("performanceMetrics.memoryUsage")}** | |`);
       if (buildMetrics.memoryMetrics.peakPostGcHeapSize)
         this.a(
           `| ${this.t.t("performanceMetrics.peakHeap")} | ${this.formatBytes(buildMetrics.memoryMetrics.peakPostGcHeapSize)} |`,
@@ -249,7 +247,7 @@ class MarkdownBuilder {
     const missDetails =
       buildMetrics.actionSummary.actionCacheStatistics?.missDetails;
     if (missDetails && missDetails.length > 0) {
-      this.h3("performanceMetrics.cacheMissBreakdown");
+      this.h2("performanceMetrics.cacheMissBreakdown");
       this.infoCard("performanceMetrics.cacheMissReason.explanation");
       this.a("| Reason | Count |");
       this.a("|---|---|");
@@ -270,7 +268,7 @@ class MarkdownBuilder {
     }
 
     if (buildMetrics.memoryMetrics?.garbageMetrics) {
-      this.h3("performanceMetrics.gcByType");
+      this.h2("performanceMetrics.gcByType");
       this.infoCard("performanceMetrics.gcExplanation");
       this.a("| Type | Collected |");
       this.a("|---|---|");
@@ -333,7 +331,7 @@ class MarkdownBuilder {
     this.a();
 
     if (builtValues && builtValues.length > 0) {
-      this.h3("buildGraphMetrics.topSkyFunctions");
+      this.h3(this.t.t("buildGraphMetrics.topSkyFunctions"));
       this.infoCard("buildGraphMetrics.skyFunctionsExplanation");
       this.a(
         `| ${this.t.t("buildGraphMetrics.skyFunction")} | ${this.t.t("buildGraphMetrics.evalCount")} |`,
@@ -436,7 +434,7 @@ class MarkdownBuilder {
 
     this.h2("buildOutputs.title");
     resolvedOutputs.forEach((files, target) => {
-      this.a(`### ${this.mdCode(target)}`);
+      this.h3(this.mdCode(target));
       this.a("```");
       files.forEach((f) => this.a(f));
       this.a("```");
@@ -459,7 +457,6 @@ class MarkdownBuilder {
     this.h2(titleKey);
 
     actionsToDetail.forEach((action) => {
-      this.a(`<details>`);
       const statusIcon = action.success ? "✔" : "❌";
       const duration = this.formatDuration(
         parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10),
@@ -468,24 +465,37 @@ class MarkdownBuilder {
         action.primaryOutput?.uri.replace("file://", "") ||
         action.label ||
         "N/A";
+
+      this.h3(`${statusIcon} ${this.mdCode(action.mnemonic)}`);
       this.a(
-        `  <summary>${statusIcon} <strong>${action.mnemonic}</strong> | ${duration} | ${this.mdCode(primaryOutput)}</summary>\n`,
+        `- **${this.t.t("actionDetails.primaryOutput")}**: ${this.mdCode(primaryOutput)}`,
       );
+      this.a(`- **${this.t.t("actionDetails.duration")}**: ${duration}`);
+
       if (action.argv && action.argv.length > 0) {
-        this.a(`- **${this.t.t("actionDetails.commandLine")}:**`);
-        this.a("  ```sh");
-        this.a("  " + action.argv.join(" "));
-        this.a("  ```");
+        this.a(`<details>`);
+        this.a(
+          `  <summary><strong>${this.t.t("actionDetails.commandLine")}</strong></summary>\n`,
+        );
+        this.a("```sh");
+        this.a(action.argv.join(" "));
+        this.a("```");
+        this.a(`</details>`);
       }
       if (action.stderrContent && action.stderrContent.trim()) {
-        this.a(`- **${this.t.t("actionDetails.stderr")}:**`);
-        this.a("  ```");
-        this.a("  " + action.stderrContent.trim().split("\n").join("\n  "));
-        this.a("  ```");
+        this.a(`<details>`);
+        this.a(
+          `  <summary><strong>${this.t.t("actionDetails.stderr")}</strong></summary>\n`,
+        );
+        this.a("```");
+        this.a(action.stderrContent.trim());
+        this.a("```");
+        this.a(`</details>`);
       }
-      this.a(`</details>`);
+      this.a();
+      this.a("---");
+      this.a();
     });
-    this.a();
   }
 }
 
