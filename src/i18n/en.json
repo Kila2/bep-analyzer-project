@@ -4,6 +4,7 @@
   "buildSummary": {
     "title": "Build Summary",
     "status": "Status",
+    "buildTime": "Build Started At",
     "totalTime": "Total Time",
     "analysisPhase": "Analysis Phase",
     "executionPhase": "Execution Phase",
@@ -48,6 +49,13 @@
     "gcType": {
       "G1YoungGeneration": "G1 Young Generation",
       "G1OldGeneration": "G1 Old Generation",
+      "G1EdenSpace": "G1 Eden Space",
+      "G1OldGen": "G1 Old Gen",
+      "G1SurvivorSpace": "G1 Survivor Space",
+      "CodeHeapprofilednmethods": "CodeHeap 'profiled nmethods'",
+      "CodeHeapnon-profilednmethods": "CodeHeap 'non-profiled nmethods'",
+      "Metaspace": "Metaspace",
+      "CompressedClassSpace": "Compressed Class Space",
       "ZGC": "ZGC",
       "Shenandoah": "Shenandoah",
       "ParNew": "ParNew",

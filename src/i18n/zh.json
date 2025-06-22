@@ -4,6 +4,7 @@
   "buildSummary": {
     "title": "构建摘要",
     "status": "状态",
+    "buildTime": "构建开始于",
     "totalTime": "总耗时",
     "analysisPhase": "分析阶段",
     "executionPhase": "执行阶段",
@@ -48,6 +49,13 @@
     "gcType": {
       "G1YoungGeneration": "G1 新生代",
       "G1OldGeneration": "G1 老年代",
+      "G1EdenSpace": "G1 Eden 区",
+      "G1OldGen": "G1 老年代",
+      "G1SurvivorSpace": "G1 存活区",
+      "CodeHeapprofilednmethods": "代码缓存 (已分析的方法)",
+      "CodeHeapnon-profilednmethods": "代码缓存 (未分析的方法)",
+      "Metaspace": "元空间",
+      "CompressedClassSpace": "压缩类空间",
       "ZGC": "ZGC",
       "Shenandoah": "Shenandoah",
       "ParNew": "ParNew",

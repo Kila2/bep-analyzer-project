@@ -24,7 +24,7 @@ import {
 function stripAnsi(str: string): string {
   // This helper is used locally for filtering logic, not for the final output
   return str.replace(
-    /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]|\r/g,
+    /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]|\\r/g,
     "",
   );
 }

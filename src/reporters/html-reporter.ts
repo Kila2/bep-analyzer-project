@@ -35,6 +35,28 @@ export class HtmlReporter {
     return parseFloat((num / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
 
+  private formatDate(ms: number, lang: "en" | "zh"): string {
+    const locale = lang === "zh" ? "zh-CN" : "en-US";
+    // Always use Shanghai timezone for consistency as requested
+    const timeZone = "Asia/Shanghai";
+
+    try {
+      return new Intl.DateTimeFormat(locale, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        weekday: "long",
+        hour: "numeric",
+        minute: "numeric",
+        second: "numeric",
+        timeZone,
+        timeZoneName: "short",
+      }).format(new Date(ms));
+    } catch (e) {
+      return new Date(ms).toLocaleString(); // Fallback
+    }
+  }
+
   private escapeAttr(text: string | undefined | null): string {
     if (text === null || text === undefined) return "";
     return String(text)
@@ -91,8 +113,11 @@ export class HtmlReporter {
     };
 
     // Summary
+    const startTime = parseInt(buildStarted.startTimeMillis, 10);
+    const finishTime = parseInt(buildFinished.finishTimeMillis, 10);
     let summaryMd = `- **${this.t.t("buildSummary.status")}**: ${buildFinished.overallSuccess ? "✅" : "❌"} ${buildFinished.exitCode?.name || (buildFinished.overallSuccess ? "SUCCESS" : "FAILURE")}\n`;
-    summaryMd += `- **${this.t.t("buildSummary.totalTime")}**: ${this.formatDuration(parseInt(buildFinished.finishTimeMillis, 10) - parseInt(buildStarted.startTimeMillis, 10))}\n`;
+    summaryMd += `- **${this.t.t("buildSummary.buildTime")}**: ${this.formatDate(startTime, this.t.getLanguage())}\n`;
+    summaryMd += `- **${this.t.t("buildSummary.totalTime")}**: ${this.formatDuration(finishTime - startTime)}\n`;
     if (buildMetrics?.timingMetrics) {
       summaryMd += `  - **${this.t.t("buildSummary.analysisPhase")}**: ${this.formatDuration(Number(buildMetrics.timingMetrics.analysisPhaseTimeInMs))}\n`;
       summaryMd += `  - **${this.t.t("buildSummary.executionPhase")}**: ${this.formatDuration(Number(buildMetrics.timingMetrics.executionPhaseTimeInMs))}\n`;
@@ -191,10 +216,25 @@ export class HtmlReporter {
       if (buildMetrics.memoryMetrics?.garbageMetrics) {
         let gcMd = `| Type | Collected |\n|---|---|\n`;
         buildMetrics.memoryMetrics.garbageMetrics.forEach((m) => {
-          const pascalCaseType = m.type.replace(/\s/g, "");
+          const originalType = m.type;
+          const pascalCaseType = originalType.replace(/[^a-zA-Z0-9]/g, "");
           const typeKey = `performanceMetrics.gcType.${pascalCaseType}`;
-          const type = this.t.t(typeKey, { type: m.type });
-          gcMd += `| ${type} | ${this.formatBytes(m.garbageCollected)} |\n`;
+          const translatedType = this.t.t(typeKey);
+
+          let displayType: string;
+          if (translatedType !== typeKey) {
+            // Translation found
+            if (this.t.getLanguage() === "zh") {
+              displayType = `${this.escapeAttr(translatedType)} (${this.escapeAttr(originalType)})`;
+            } else {
+              displayType = this.escapeAttr(translatedType);
+            }
+          } else {
+            // No translation, fallback to original
+            displayType = this.escapeAttr(originalType);
+          }
+
+          gcMd += `| ${displayType} | ${this.formatBytes(m.garbageCollected)} |\n`;
         });
         perfContent += `<details open><summary>${this.t.t("performanceMetrics.gcByType")}</summary><div>
             ${this.renderInfoCard("performanceMetrics.gcByType", "performanceMetrics.gcExplanation")}
@@ -767,6 +807,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterButtons = document.querySelectorAll('.filter-btn');
     const reportNav = document.getElementById('report-nav');
     const mainContent = document.querySelector('main');
+    const contentWrapper = document.querySelector('.content-wrapper');
 
     const switchTab = (tabId) => {
         tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
@@ -775,47 +816,49 @@ document.addEventListener('DOMContentLoaded', () => {
         const isReportTab = tabId === 'report';
         searchInput.style.display = isActionsTab ? 'block' : 'none';
         filterButtons.forEach(b => b.style.display = isActionsTab ? 'block' : 'none');
-        reportNav.style.display = isReportTab ? '' : 'none';
-        mainContent.style.maxWidth = isReportTab ? '' : '100%';
+        if (reportNav) reportNav.style.display = isReportTab ? '' : 'none';
+        if (mainContent) mainContent.style.maxWidth = isReportTab ? '' : '100%';
     };
 
     tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
 
     // Sidebar Navigation
     const reportTab = document.getElementById('tab-report');
-    const headers = reportTab.querySelectorAll('h2[data-nav-title]');
-    const navList = document.createElement('ul');
-    const navItems = [];
-    headers.forEach(header => {
-        const li = document.createElement('li');
-        const a = document.createElement('a');
-        a.href = \`#\${header.id}\`;
-        a.textContent = header.dataset.navTitle;
-        a.dataset.targetId = header.id;
-        li.appendChild(a);
-        navList.appendChild(li);
-        navItems.push({ a, header });
-    });
-    if(reportNav) reportNav.appendChild(navList);
+    if (reportNav && reportTab) {
+        const headers = reportTab.querySelectorAll('h2[data-nav-title]');
+        const navList = document.createElement('ul');
+        const navItems = [];
+        headers.forEach(header => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = \`#\${header.id}\`;
+            a.textContent = header.dataset.navTitle;
+            a.dataset.targetId = header.id;
+            li.appendChild(a);
+            navList.appendChild(li);
+            navItems.push({ a, header });
+        });
+        reportNav.appendChild(navList);
 
-    const onScroll = () => {
-        let currentSection = null;
-        const scrollPos = window.scrollY + mainContent.offsetTop + 100;
+        const onScroll = () => {
+            let currentSection = null;
+            const scrollOffset = window.scrollY + 80; // Adjusted for header height
 
-        for (const item of navItems) {
-            if (item.header.offsetTop <= scrollPos) {
-                currentSection = item.a;
-            } else {
-                break;
+            for (const item of navItems) {
+                if (item.header.offsetTop <= scrollOffset) {
+                    currentSection = item.a;
+                } else {
+                    break;
+                }
             }
-        }
-        navItems.forEach(item => item.a.classList.remove('active'));
-        if (currentSection) {
-            currentSection.classList.add('active');
-        }
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
+            navItems.forEach(item => item.a.classList.remove('active'));
+            if (currentSection) {
+                currentSection.classList.add('active');
+            }
+        };
+        window.addEventListener('scroll', onScroll, { passive: true });
+        onScroll(); // Initial check
+    }
 
     // Action Details Filtering
     const actionGroups = document.querySelectorAll('.action-group');

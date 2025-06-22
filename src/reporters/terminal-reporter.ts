@@ -29,6 +29,28 @@ function formatBytes(bytes: number | string): string {
   return parseFloat((num / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
+function formatDate(ms: number, lang: "en" | "zh"): string {
+  const locale = lang === "zh" ? "zh-CN" : "en-US";
+  // Always use Shanghai timezone for consistency as requested
+  const timeZone = "Asia/Shanghai";
+
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "long",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      timeZone,
+      timeZoneName: "short",
+    }).format(new Date(ms));
+  } catch (e) {
+    return new Date(ms).toLocaleString(); // Fallback
+  }
+}
+
 export class TerminalReporter {
   constructor(
     private data: ReportData,
@@ -76,21 +98,35 @@ export class TerminalReporter {
     const status = success
       ? chalk.green(exitCodeName)
       : chalk.red(exitCodeName);
-    console.log(`${this.t.t("buildSummary.status")}: ${status}`);
     const startTime = parseInt(buildStarted.startTimeMillis, 10);
     const finishTime = parseInt(buildFinished.finishTimeMillis, 10);
-    console.log(
-      `${this.t.t("buildSummary.totalTime")}: ${chalk.yellow(formatDuration(finishTime - startTime))}`,
+
+    const summaryTable = new Table({ style: { head: [], border: [] } });
+    summaryTable.push(
+      [`${this.t.t("buildSummary.status")}:`, status],
+      [
+        `${this.t.t("buildSummary.buildTime")}:`,
+        chalk.gray(formatDate(startTime, this.t.getLanguage())),
+      ],
+      [
+        `${this.t.t("buildSummary.totalTime")}:`,
+        chalk.yellow(formatDuration(finishTime - startTime)),
+      ],
     );
     if (buildMetrics?.timingMetrics) {
       const metrics = buildMetrics.timingMetrics;
-      console.log(
-        `  - ${this.t.t("buildSummary.analysisPhase")}: ${chalk.magenta(formatDuration(Number(metrics.analysisPhaseTimeInMs)))}`,
-      );
-      console.log(
-        `  - ${this.t.t("buildSummary.executionPhase")}: ${chalk.magenta(formatDuration(Number(metrics.executionPhaseTimeInMs)))}`,
+      summaryTable.push(
+        [
+          `  - ${this.t.t("buildSummary.analysisPhase")}:`,
+          chalk.magenta(formatDuration(Number(metrics.analysisPhaseTimeInMs))),
+        ],
+        [
+          `  - ${this.t.t("buildSummary.executionPhase")}:`,
+          chalk.magenta(formatDuration(Number(metrics.executionPhaseTimeInMs))),
+        ],
       );
     }
+    console.log(summaryTable.toString());
 
     // --- Build Environment & Options ---
     console.log(chalk.bold.cyan(`\n--- ${this.t.t("buildEnv.title")} ---`));
@@ -277,8 +313,26 @@ export class TerminalReporter {
               (a, b) => Number(b.garbageCollected) - Number(a.garbageCollected),
             )
             .forEach((metric) => {
+              const originalType = metric.type;
+              const pascalCaseType = originalType.replace(/[^a-zA-Z0-9]/g, "");
+              const typeKey = `performanceMetrics.gcType.${pascalCaseType}`;
+              const translatedType = this.t.t(typeKey);
+
+              let displayType: string;
+              if (translatedType !== typeKey) {
+                // Translation found
+                if (this.t.getLanguage() === "zh") {
+                  displayType = `${translatedType} (${originalType})`;
+                } else {
+                  displayType = translatedType;
+                }
+              } else {
+                // No translation, fallback to original
+                displayType = originalType;
+              }
+
               gcRows.push([
-                `  ${metric.type}`,
+                `  ${displayType}`,
                 chalk.magenta(formatBytes(metric.garbageCollected)),
               ]);
             });
