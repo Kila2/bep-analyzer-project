@@ -176,22 +176,13 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     } else if (id.actionCompleted) {
       const lastAction = this.actions[this.actions.length - 1];
       if (lastAction && this.displayMode === "vscode-log") {
-        const mnemonic = lastAction.mnemonic || lastAction.type;
+        const hasCommand = lastAction.argv && lastAction.argv.length > 0;
 
         // --- CORRECTED LOGIC ---
-        // Special, compact logging for Symlink actions
-        if (mnemonic === "Symlink") {
-          const outputPath = (lastAction.primaryOutput?.uri || "").replace(
-            /^file:\/\//,
-            "",
-          );
-          if (outputPath) {
-            console.log(
-              `[SYMLINK] Creating ${outputPath} (from ${lastAction.label})`,
-            );
-          }
-        } else {
-          // Detailed logging for all other actions
+        // Log the action if it's a failure OR if it has a command line.
+        // This filters out successful, command-less internal actions.
+        if (!lastAction.success || hasCommand) {
+          const mnemonic = lastAction.mnemonic || lastAction.type;
           const duration = parseInt(
             lastAction.actionResult?.executionInfo.wallTimeMillis || "0",
             10,
@@ -201,8 +192,8 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           console.log(
             `[ACTION] ${status} | ${mnemonic} | ${formatDuration(duration)} | ${lastAction.label}`,
           );
-          if (lastAction.argv) {
-            console.log(`  CMD: ${lastAction.argv.join(" ")}`);
+          if (hasCommand) {
+            console.log(`  CMD: ${lastAction.argv?.join(" ")}`);
           }
           if (!lastAction.success && lastAction.stderrContent) {
             console.log(
