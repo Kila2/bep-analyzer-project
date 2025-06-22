@@ -87,6 +87,15 @@ function parseProgress(text: string): ProgressInfo {
 
 export type LiveDisplayMode = "dashboard" | "vscode-log" | "vscode-status";
 
+// A set of mnemonics for actions that are always uninteresting in vscode-log.
+const VSCODE_LOG_MNEMONIC_DENYLIST = new Set([
+  "Symlink",
+  "SourceSymlinkManifest",
+  "RepoMappingManifest",
+  "TemplateExpand",
+  "BazelWorkspaceStatusAction",
+]);
+
 export class LiveBepAnalyzer extends StaticBepAnalyzer {
   private progressText: string = "Initializing...";
   private runningTime: string = "0.00s";
@@ -170,30 +179,38 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     if (id.buildStarted || id.started) {
       if (!this.timer) this.startTimer();
       if (this.displayMode === "vscode-log" && data.started) {
-        console.log(`[START] Build started. Command: ${data.started.command}`);
-        console.log(`---`);
+        console.log(
+          `🚀 [START] Build started. Command: ${data.started.command}\n---`,
+        );
       }
     } else if (id.actionCompleted) {
       const lastAction = this.actions[this.actions.length - 1];
       if (lastAction && this.displayMode === "vscode-log") {
-        const hasCommand = lastAction.argv && lastAction.argv.length > 0;
+        const mnemonic = lastAction.mnemonic || lastAction.type;
 
-        // --- CORRECTED LOGIC ---
-        // Log the action if it's a failure OR if it has a command line.
-        // This filters out successful, command-less internal actions.
-        if (!lastAction.success || hasCommand) {
-          const mnemonic = lastAction.mnemonic || lastAction.type;
+        // --- FINAL LOGIC ---
+        // Completely suppress the log for uninteresting, successful internal actions.
+        if (
+          lastAction.success &&
+          mnemonic &&
+          VSCODE_LOG_MNEMONIC_DENYLIST.has(mnemonic)
+        ) {
+          // Do nothing.
+        } else {
+          // Log all failures and all actions with command lines.
           const duration = parseInt(
             lastAction.actionResult?.executionInfo.wallTimeMillis || "0",
             10,
           );
-          const status = lastAction.success ? "SUCCESS" : "FAILURE";
+          const statusIcon = lastAction.success ? "✅" : "❌";
+          const statusText = lastAction.success ? "SUCCESS" : "FAILURE";
 
           console.log(
-            `[ACTION] ${status} | ${mnemonic} | ${formatDuration(duration)} | ${lastAction.label}`,
+            `[ACTION] ${statusIcon} ${statusText} | ${mnemonic} | ${formatDuration(duration)} | ${lastAction.label}`,
           );
-          if (hasCommand) {
-            console.log(`  CMD: ${lastAction.argv?.join(" ")}`);
+
+          if (lastAction.argv && lastAction.argv.length > 0) {
+            console.log(`  CMD: ${lastAction.argv.join(" ")}`);
           }
           if (!lastAction.success && lastAction.stderrContent) {
             console.log(
@@ -216,8 +233,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
       }
     } else if (id.problem) {
       if (this.displayMode === "vscode-log" && data.problem) {
-        console.log(`[PROBLEM] ${data.problem.message.trim()}`);
-        console.log(`---`);
+        console.log(`[PROBLEM] 🛑 ${data.problem.message.trim()}\n---`);
       }
       if (this.displayMode === "dashboard" && data.problem) {
         const problemMsg = `Problem: ${data.problem.message.split("\n")[0]}`;
@@ -233,7 +249,11 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
       }
       if (parsed.currentLabel) this.lastCurrentLabel = parsed.currentLabel;
 
-      if (this.displayMode === "dashboard") {
+      if (this.displayMode === "vscode-log") {
+        parsed.logs.forEach((log) =>
+          console.log(`[WARN] ⚠️ ${stripAnsi(log).trim()}`),
+        );
+      } else if (this.displayMode === "dashboard") {
         parsed.logs.forEach((log) => {
           if (stripAnsi(log).trim()) this.addRecentLog(`  ${log}`);
         });
@@ -247,9 +267,8 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           : 0;
         const totalTime =
           startTime > 0 ? formatDuration(finishTime - startTime) : "N/A";
-        console.log(
-          `[FINISH] ${data.finished.overallSuccess ? "SUCCESS" : "FAILURE"} | Total Time: ${totalTime}`,
-        );
+        const statusText = data.finished.overallSuccess ? "SUCCESS" : "FAILURE";
+        console.log(`🏁 [FINISH] ${statusText} | Total Time: ${totalTime}`);
       }
     }
   }
