@@ -471,7 +471,7 @@ export class HtmlReporter {
     const searchPlaceholder = this.t.t("actionDetails.searchPlaceholder");
 
     return `<!DOCTYPE html>
-<html lang="${this.t.lang}">
+<html lang="${this.t.lang}" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <title>${title}</title>
@@ -493,7 +493,7 @@ html[data-theme='dark'] {
     --bg-alt: #161b22;
     --border-color: #30363d;
     --accent-color: #58a6ff;
-    --info-bg: #161b22;
+    --info-bg: #1f6feb26;
     --info-border: #30363d;
 }
 body {
@@ -522,7 +522,7 @@ body {
 }
 .header-left { flex: 1; text-align: left; }
 .header-center { flex: 2; display: flex; justify-content: center; }
-.header-right { flex: 1; display: flex; justify-content: flex-end; gap: .5rem; }
+.header-right { flex: 1; display: flex; justify-content: flex-end; align-items: center; gap: .5rem; }
 #action-search {
     width: 100%;
     max-width: 500px;
@@ -530,19 +530,34 @@ body {
     padding: .5rem 1rem;
     border: 1px solid var(--border-color);
     border-radius: 6px;
+    background-color: var(--bg-color);
+    color: var(--fg-color);
 }
 .filter-btn {
     font-size: .9rem;
     padding: .5rem 1rem;
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    background: 0;
+    background: transparent;
+    color: var(--fg-color);
     cursor: pointer;
 }
 .filter-btn.active {
     background: var(--accent-color);
     color: #fff;
     border-color: var(--accent-color);
+}
+#theme-toggle {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--fg-color);
 }
 .content-wrapper {
     display: flex;
@@ -598,7 +613,7 @@ main {
     cursor: pointer;
     border: 0;
     border-bottom: 3px solid transparent;
-    background: 0;
+    background: transparent;
     font-size: 1rem;
     color: var(--fg-color);
 }
@@ -658,7 +673,7 @@ pre {
 }
 code {
     font-family: monospace;
-    background-color: rgba(27,31,35,.07);
+    background-color: rgba(150,150,150,.1);
     border-radius: 6px;
     padding: .2em .4em;
     font-size: 85%;
@@ -774,6 +789,25 @@ pre > code { padding: 0; background: 0; border: 0; }
     color: var(--fg-color);
     opacity: 0.8;
 }
+#back-to-top {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: var(--accent-color);
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.3s;
+}
+#back-to-top:hover { opacity: 1; }
 
 @media (max-width: 960px) {
     #report-nav {
@@ -791,8 +825,12 @@ pre > code { padding: 0; background: 0; border: 0; }
         <div class="header-left"><h1 class="header-title">${title}</h1></div>
         <div class="header-center"><input type="text" id="action-search" placeholder="${searchPlaceholder}" style="display:none;"></div>
         <div class="header-right">
-            <button class="filter-btn" data-filter="all" style="display:none;">All Actions</button>
-            <button class="filter-btn" data-filter="failed" style="display:none;">Failed Actions</button>
+            <button class="filter-btn" data-filter="all" style="display:none;">All</button>
+            <button class="filter-btn" data-filter="failed" style="display:none;">Failed</button>
+            <button id="theme-toggle" title="Toggle theme">
+                <span class="light-mode-icon">🌙</span>
+                <span class="dark-mode-icon" style="display:none;">☀️</span>
+            </button>
         </div>
     </header>
     <div class="content-wrapper">
@@ -806,141 +844,184 @@ pre > code { padding: 0; background: 0; border: 0; }
             <div id="tab-actions" class="tab-content">${actionsBody}</div>
         </main>
     </div>
+    <button id="back-to-top" title="Back to top">↑</button>
 </div>
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-    const tabs = document.querySelectorAll('.tab-btn');
-    const contents = document.querySelectorAll('.tab-content');
-    const searchInput = document.getElementById('action-search');
-    const filterButtons = document.querySelectorAll('.filter-btn');
-    const reportNav = document.getElementById('report-nav');
-    const mainContent = document.querySelector('main');
-    const contentWrapper = document.querySelector('.content-wrapper');
+(() => {
+    // --- THEME ---
+    const themeToggle = document.getElementById('theme-toggle');
+    const lightIcon = themeToggle.querySelector('.light-mode-icon');
+    const darkIcon = themeToggle.querySelector('.dark-mode-icon');
+    const htmlEl = document.documentElement;
 
-    const switchTab = (tabId) => {
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
-        contents.forEach(c => c.classList.toggle('active', c.id === \`tab-\${tabId}\`));
-        const isActionsTab = tabId === 'actions';
-        const isReportTab = tabId === 'report';
-        searchInput.style.display = isActionsTab ? 'block' : 'none';
-        filterButtons.forEach(b => b.style.display = isActionsTab ? 'block' : 'none');
-        if (reportNav) reportNav.style.display = isReportTab ? '' : 'none';
-        if (mainContent) mainContent.style.maxWidth = isReportTab ? '' : '100%';
+    const applyTheme = (theme) => {
+        htmlEl.dataset.theme = theme;
+        lightIcon.style.display = theme === 'light' ? 'block' : 'none';
+        darkIcon.style.display = theme === 'dark' ? 'block' : 'none';
+        localStorage.setItem('bep-analyzer-theme', theme);
     };
 
-    tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+    themeToggle.addEventListener('click', () => {
+        const newTheme = htmlEl.dataset.theme === 'dark' ? 'light' : 'dark';
+        applyTheme(newTheme);
+    });
 
-    // Sidebar Navigation
-    const reportTab = document.getElementById('tab-report');
-    if (reportNav && reportTab) {
-        const headers = reportTab.querySelectorAll('h2[data-nav-title]');
-        const navList = document.createElement('ul');
-        const navItems = [];
-        headers.forEach(header => {
-            const li = document.createElement('li');
-            const a = document.createElement('a');
-            a.href = \`#\${header.id}\`;
-            a.textContent = header.dataset.navTitle;
-            a.dataset.targetId = header.id;
-            li.appendChild(a);
-            navList.appendChild(li);
-            navItems.push({ a, header });
+    const savedTheme = localStorage.getItem('bep-analyzer-theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(savedTheme || (prefersDark ? 'dark' : 'light'));
+
+    // --- MAIN LOGIC ---
+    document.addEventListener('DOMContentLoaded', () => {
+        const backToTopBtn = document.getElementById('back-to-top');
+
+        // Back to top button
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 300) {
+                backToTopBtn.style.display = 'flex';
+            } else {
+                backToTopBtn.style.display = 'none';
+            }
+        }, { passive: true });
+
+        backToTopBtn.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
-        reportNav.appendChild(navList);
 
-        const onScroll = () => {
-            let currentSection = null;
-            const scrollOffset = window.scrollY + 80; // Adjusted for header height
+        const tabs = document.querySelectorAll('.tab-btn');
+        const contents = document.querySelectorAll('.tab-content');
+        const searchInput = document.getElementById('action-search');
+        const filterButtons = document.querySelectorAll('.filter-btn');
+        const reportNav = document.getElementById('report-nav');
+        const mainContent = document.querySelector('main');
+        const contentWrapper = document.querySelector('.content-wrapper');
 
-            for (const item of navItems) {
-                if (item.header.offsetTop <= scrollOffset) {
-                    currentSection = item.a;
-                } else {
-                    break;
-                }
-            }
-            navItems.forEach(item => item.a.classList.remove('active'));
-            if (currentSection) {
-                currentSection.classList.add('active');
-            }
+        const switchTab = (tabId) => {
+            tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+            contents.forEach(c => c.classList.toggle('active', c.id === \`tab-\${tabId}\`));
+            const isActionsTab = tabId === 'actions';
+            const isReportTab = tabId === 'report';
+            searchInput.style.display = isActionsTab ? 'block' : 'none';
+            filterButtons.forEach(b => b.style.display = isActionsTab ? 'block' : 'none');
+            if (reportNav) reportNav.style.display = isReportTab ? '' : 'none';
+            if (mainContent) mainContent.style.maxWidth = isReportTab ? '' : '100%';
         };
-        window.addEventListener('scroll', onScroll, { passive: true });
-        onScroll(); // Initial check
-    }
 
-    // Action Details Filtering
-    const actionGroups = document.querySelectorAll('.action-group');
-    const filterState = { query: '', view: 'all' };
+        tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
 
-    const applyFilters = () => {
-        const query = filterState.query.toLowerCase();
-        actionGroups.forEach(group => {
-            const hasFailures = group.dataset.failed === 'true';
-            const showByView = filterState.view === 'all' || (filterState.view === 'failed' && hasFailures);
+        // Sidebar Navigation
+        const reportTab = document.getElementById('tab-report');
+        if (reportNav && reportTab) {
+            const headers = reportTab.querySelectorAll('h2[data-nav-title]');
+            const navList = document.createElement('ul');
+            const navItems = [];
+            if (headers.length > 0) {
+                headers.forEach(header => {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = \`#\${header.id}\`;
+                    a.textContent = header.dataset.navTitle;
+                    a.dataset.targetId = header.id;
+                    li.appendChild(a);
+                    navList.appendChild(li);
+                    navItems.push({ a, header });
+                });
+                reportNav.appendChild(navList);
 
-            let matchCount = 0;
-            const items = group.querySelectorAll('.action-item');
-            items.forEach(item => {
-                const searchContent = item.dataset.searchContent.toLowerCase();
-                const showByQuery = !query || searchContent.includes(query);
-                item.style.display = showByQuery ? '' : 'none';
-                if (showByQuery) matchCount++;
+                const onScroll = () => {
+                    let currentSection = null;
+                    const scrollOffset = window.scrollY + 80;
+
+                    for (const item of navItems) {
+                        if (item.header.offsetTop <= scrollOffset) {
+                            currentSection = item.a;
+                        } else {
+                            break;
+                        }
+                    }
+                    navItems.forEach(item => item.a.classList.remove('active'));
+                    if (currentSection) {
+                        currentSection.classList.add('active');
+                    }
+                };
+                window.addEventListener('scroll', onScroll, { passive: true });
+                onScroll();
+            }
+        }
+
+        // Action Details Filtering
+        const actionGroups = document.querySelectorAll('.action-group');
+        const filterState = { query: '', view: 'all' };
+
+        const applyFilters = () => {
+            const query = filterState.query.toLowerCase();
+            actionGroups.forEach(group => {
+                const hasFailures = group.dataset.failed === 'true';
+                const showByView = filterState.view === 'all' || (filterState.view === 'failed' && hasFailures);
+
+                let matchCount = 0;
+                const items = group.querySelectorAll('.action-item');
+                items.forEach(item => {
+                    const searchContent = item.dataset.searchContent.toLowerCase();
+                    const showByQuery = !query || searchContent.includes(query);
+                    item.style.display = showByQuery ? '' : 'none';
+                    if (showByQuery) matchCount++;
+                });
+
+                group.style.display = showByView && (matchCount > 0) ? '' : 'none';
             });
+        };
 
-            group.style.display = showByView && (matchCount > 0) ? '' : 'none';
+        filterButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                filterState.view = btn.dataset.filter;
+                applyFilters();
+            });
         });
-    };
+        if (filterButtons.length > 0) filterButtons[0].classList.add('active');
 
-    filterButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            filterButtons.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            filterState.view = btn.dataset.filter;
+        searchInput.addEventListener('input', e => {
+            filterState.query = e.target.value;
             applyFilters();
         });
-    });
-    if (filterButtons.length > 0) filterButtons[0].classList.add('active');
 
-    searchInput.addEventListener('input', e => {
-        filterState.query = e.target.value;
-        applyFilters();
-    });
-
-    document.querySelectorAll('.action-group-summary').forEach(summary => {
-        summary.addEventListener('click', () => {
-            const content = summary.nextElementSibling;
-            content.style.display = content.style.display === 'block' ? 'none' : 'block';
+        document.querySelectorAll('.action-group-summary').forEach(summary => {
+            summary.addEventListener('click', () => {
+                const content = summary.nextElementSibling;
+                content.style.display = content.style.display === 'block' ? 'none' : 'block';
+            });
         });
-    });
 
-    document.querySelectorAll('.copy-btn').forEach(button => {
-        button.addEventListener('click', e => {
-            e.stopPropagation(); // prevent details from toggling
-            const targetButton = e.currentTarget;
-            const pre = targetButton.parentElement.querySelector('pre');
-            if (!pre) return;
+        document.querySelectorAll('.copy-btn').forEach(button => {
+            button.addEventListener('click', e => {
+                e.stopPropagation();
+                const targetButton = e.currentTarget;
+                const pre = targetButton.parentElement.querySelector('pre');
+                if (!pre) return;
 
-            const textToCopy = pre.dataset.copyContent || pre.innerText;
+                const textToCopy = pre.dataset.copyContent || pre.innerText;
 
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalText = targetButton.innerText;
-                targetButton.innerText = targetButton.dataset.copiedText || 'Copied!';
-                targetButton.disabled = true;
-                setTimeout(() => {
-                    targetButton.innerText = originalText;
-                    targetButton.disabled = false;
-                }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy text: ', err);
-                const originalText = targetButton.innerText;
-                targetButton.innerText = 'Error';
-                setTimeout(() => {
-                    targetButton.innerText = originalText;
-                }, 2000);
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    const originalText = targetButton.innerText;
+                    targetButton.innerText = targetButton.dataset.copiedText || 'Copied!';
+                    targetButton.disabled = true;
+                    setTimeout(() => {
+                        targetButton.innerText = originalText;
+                        targetButton.disabled = false;
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                    const originalText = targetButton.innerText;
+                    targetButton.innerText = 'Error';
+                    setTimeout(() => {
+                        targetButton.innerText = originalText;
+                    }, 2000);
+                });
             });
         });
     });
-});
+})();
 </script>
 </body>
 </html>`;
