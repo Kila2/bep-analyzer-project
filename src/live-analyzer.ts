@@ -92,7 +92,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
   private runningTime: string = "0.00s";
   private isFinished: boolean = false;
   private timer: NodeJS.Timeout | null = null;
-  private readonly spinner = ["⠋", "⠙", "⠹", "⸸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  private readonly spinner = ["⠋", "⠙", "⠹", "⸸", "⠼", "ⴴ", "⠦", "⠧", "⠇", "⠏"];
   private spinnerIndex = 0;
   private recentLogs: string[] = [];
   private dashboardStartTime: number = 0;
@@ -139,7 +139,6 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
         if (this.isFinished) {
           this.stop();
           if (tail.unwatch) tail.unwatch();
-          // Final render call for modes that need it
           if (this.displayMode === "vscode-status") {
             this.renderVscodeStatus();
             logUpdate.done();
@@ -177,24 +176,41 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     } else if (id.actionCompleted) {
       const lastAction = this.actions[this.actions.length - 1];
       if (lastAction && this.displayMode === "vscode-log") {
-        const duration = parseInt(
-          lastAction.actionResult?.executionInfo.wallTimeMillis || "0",
-          10,
-        );
-        const status = lastAction.success ? "SUCCESS" : "FAILURE";
+        const mnemonic = lastAction.mnemonic || lastAction.type;
 
-        console.log(
-          `[ACTION] ${status} | ${lastAction.mnemonic} | ${formatDuration(duration)} | ${lastAction.label}`,
-        );
-        if (lastAction.argv) {
-          console.log(`  CMD: ${lastAction.argv.join(" ")}`);
-        }
-        if (!lastAction.success && lastAction.stderrContent) {
-          console.log(
-            `  STDERR:\n${stripAnsi(lastAction.stderrContent).trim()}`,
+        // --- CORRECTED LOGIC ---
+        // Special, compact logging for Symlink actions
+        if (mnemonic === "Symlink") {
+          const outputPath = (lastAction.primaryOutput?.uri || "").replace(
+            /^file:\/\//,
+            "",
           );
+          if (outputPath) {
+            console.log(
+              `[SYMLINK] Creating ${outputPath} (from ${lastAction.label})`,
+            );
+          }
+        } else {
+          // Detailed logging for all other actions
+          const duration = parseInt(
+            lastAction.actionResult?.executionInfo.wallTimeMillis || "0",
+            10,
+          );
+          const status = lastAction.success ? "SUCCESS" : "FAILURE";
+
+          console.log(
+            `[ACTION] ${status} | ${mnemonic} | ${formatDuration(duration)} | ${lastAction.label}`,
+          );
+          if (lastAction.argv) {
+            console.log(`  CMD: ${lastAction.argv.join(" ")}`);
+          }
+          if (!lastAction.success && lastAction.stderrContent) {
+            console.log(
+              `  STDERR:\n${stripAnsi(lastAction.stderrContent).trim()}`,
+            );
+          }
+          console.log(`---`);
         }
-        console.log(`---`);
       }
       if (lastAction && this.displayMode === "dashboard") {
         if (lastAction.success) {
@@ -252,10 +268,6 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     this.timer = setInterval(() => {
       if (!this.isFinished) {
         this.spinnerIndex = (this.spinnerIndex + 1) % this.spinner.length;
-
-        // --- CORRECTED LOGIC ---
-        // Only run render loops for the modes that need them.
-        // 'vscode-log' does NOT need a render loop.
         switch (this.displayMode) {
           case "vscode-status":
             this.renderVscodeStatus();
