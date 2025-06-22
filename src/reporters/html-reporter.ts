@@ -34,6 +34,10 @@ export class HtmlReporter {
     const i = Math.floor(Math.log(num) / Math.log(k));
     return parseFloat((num / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
+
+  /**
+   * Safely escapes a string for use in an HTML attribute.
+   */
   private escapeAttr(text: string | undefined | null): string {
     if (text === null || text === undefined) return "";
     return String(text)
@@ -43,19 +47,17 @@ export class HtmlReporter {
       .replace(/>/g, ">");
   }
 
-  // --- START OF CRITICAL FIX ---
   /**
    * Creates a markdown code block from text, safely handling file URIs.
    */
   private mdCode(text: string | undefined | null): string {
     if (text === null || text === undefined) return "`N/A`";
-    // Clean up file URIs inside this safe helper
+    // Clean up file URIs and backticks for markdown
     const cleanedText = String(text)
       .replace(/^file:\/\//, "")
       .replace(/`/g, "'");
     return `\`${cleanedText}\``;
   }
-  // --- END OF CRITICAL FIX ---
 
   // --- Tab Content Builders ---
   private buildReportTab(): string {
@@ -191,10 +193,8 @@ export class HtmlReporter {
       )
       .slice(0, 10)
       .forEach((a) => {
-        // --- START OF CRITICAL FIX ---
         const outputTarget = a.primaryOutput?.uri || a.label;
         slowestMd += `| ${this.formatDuration(parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(a.mnemonic)} | ${this.mdCode(outputTarget)} |\n`;
-        // --- END OF CRITICAL FIX ---
       });
     html += renderSection(
       "slowestActions.title",
@@ -217,13 +217,16 @@ export class HtmlReporter {
         groupedActions.get(key)!.push(a);
       });
 
+      const copyButtonText = this.t.t("actionDetails.copyButton");
+      const copiedButtonText = this.t.t("actionDetails.copiedButton");
+
       groupedActions.forEach((actionList, label) => {
         const failedCount = actionList.filter((a) => !a.success).length;
         const hasFailures = failedCount > 0;
         html += `<div class="action-group" data-label="${this.escapeAttr(label)}" data-failed="${hasFailures}">`;
         html += `<div class="action-group-summary">`;
         html += `<span class="icon">${hasFailures ? "❌" : "✔"}</span>`;
-        html += `<code class="label-code">${this.escapeAttr(label)}</code>`;
+        html += `<code class="label-code" title="${this.escapeAttr(label)}">${this.escapeAttr(label)}</code>`;
         html += `<span class="action-group-stats">${actionList.length} actions, ${failedCount} failed</span>`;
         html += `</div>`;
         html += `<div class="action-group-content">`;
@@ -244,16 +247,31 @@ export class HtmlReporter {
               action.label ||
               "N/A"
             ).replace(/^file:\/\//, "");
-            html += `<details class="action-item" data-search-content="${this.escapeAttr(action.mnemonic)} ${this.escapeAttr(output)}"><summary>`;
+            const searchContent = `${action.mnemonic} ${output}`;
+            html += `<details class="action-item" data-search-content="${this.escapeAttr(searchContent)}"><summary>`;
             html += `<span class="icon">${action.success ? "✅" : "❌"}</span>`;
             html += `<strong>${this.escapeAttr(action.mnemonic)}</strong>`;
             html += `<span class="duration">${this.formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10))}</span>`;
-            html += `<code class="output-code">${this.escapeAttr(output)}</code>`;
+            html += `<code class="output-code" title="${this.escapeAttr(output)}">${this.escapeAttr(output)}</code>`;
             html += `</summary><div class="details-content">`;
-            if (command)
-              html += `<h4>${this.t.t("actionDetails.commandLine")}</h4><pre><code>${this.escapeAttr(command.join(" "))}</code></pre>`;
-            if (stderr)
-              html += `<h4>${this.t.t("actionDetails.stderr")}</h4><pre>${this.ansiConverter.toHtml(stderr)}</pre>`;
+            if (command) {
+              html += `<h4>${this.t.t("actionDetails.commandLine")}</h4>`;
+              html += `<div class="code-block">`;
+              html += `<button class="copy-btn" data-copied-text="${copiedButtonText}">${copyButtonText}</button>`;
+              html += `<pre>${this.escapeAttr(command.join(" "))}</pre>`;
+              html += `</div>`;
+            }
+            if (stderr) {
+              html += `<h4>${this.t.t("actionDetails.stderr")}</h4>`;
+              const plainStderr = stderr.replace(
+                /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+                "",
+              );
+              html += `<div class="code-block">`;
+              html += `<button class="copy-btn" data-copied-text="${copiedButtonText}">${copyButtonText}</button>`;
+              html += `<pre data-copy-content="${this.escapeAttr(plainStderr)}">${this.ansiConverter.toHtml(stderr)}</pre>`;
+              html += `</div>`;
+            }
             html += `</div></details>`;
           });
         html += `</div></div>`;
@@ -282,41 +300,218 @@ export class HtmlReporter {
   ): string {
     const searchPlaceholder = this.t.t("actionDetails.searchPlaceholder");
 
-    return `<!DOCTYPE html><html lang="${this.t.lang}"><head><meta charset="UTF-8"><title>${title}</title><style>
-:root{--header-height:60px;--bg-color:#fff;--fg-color:#24292e;--bg-alt:#f6f8fa;--border-color:#e1e4e8;--accent-color:#0366d6;}
-html[data-theme='dark']{--bg-color:#0d1117;--fg-color:#c9d1d9;--bg-alt:#161b22;--border-color:#30363d;--accent-color:#58a6ff;}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.5;color:var(--fg-color);background-color:var(--bg-alt);margin:0;}
-.page-header{display:flex;justify-content:space-between;align-items:center;padding:0 24px;height:var(--header-height);background:var(--bg-color);border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:100;}
-.header-left{flex:1;text-align:left}.header-center{flex:2;display:flex;justify-content:center}.header-right{flex:1;display:flex;justify-content:flex-end;gap:.5rem}
-#action-search{width:100%;max-width:500px;font-size:1rem;padding:.5rem 1rem;border:1px solid var(--border-color);border-radius:6px;}
-.filter-btn{font-size:.9rem;padding:.5rem 1rem;border:1px solid var(--border-color);border-radius:6px;background:0;cursor:pointer}
-.filter-btn.active{background:var(--accent-color);color:#fff;border-color:var(--accent-color)}
-.tab-bar{display:flex;border-bottom:1px solid var(--border-color);background:var(--bg-color);padding:0 24px}
-.tab-btn{padding:1rem 1.5rem;cursor:pointer;border:0;border-bottom:3px solid transparent;background:0;font-size:1rem;color:var(--fg-color)}
-.tab-btn.active{border-bottom-color:var(--accent-color);font-weight:600}
-.tab-content{display:none;padding:24px}.tab-content.active{display:block}
-.report-section > h2{margin:2rem 0 1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border-color)}.report-section:first-child > h2{margin-top:0}
-details > summary { list-style: none; cursor: pointer; } details > summary::-webkit-details-marker { display: none; }
-table{border-collapse:collapse;width:100%;margin:1rem 0}
-th,td{border:1px solid var(--border-color);padding:.6em 1em;text-align:left;vertical-align:top}
-th{background-color:var(--bg-alt)}
-pre{background-color:var(--bg-alt);border-radius:6px;padding:1rem;white-space:pre-wrap;word-break:break-all;overflow-x:auto;}
-code{font-family:monospace;background-color:rgba(27,31,35,.07);border-radius:6px;padding:.2em .4em;font-size:85%}
-pre>code{padding:0;background:0;border:0}
-.action-group{border:1px solid var(--border-color);border-radius:8px;margin-bottom:4px;overflow:hidden}
-.action-group-summary{display:flex;gap:.75rem;align-items:center;padding:.5rem 1rem;cursor:pointer;background:var(--bg-alt)}
-.action-group-summary:hover{background-color:var(--border-color)}
-.action-group-summary > .icon{font-size:1.2em;flex-shrink:0}
-.action-group-summary > .label-code{flex-grow:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.action-group-stats{flex-shrink:0;margin-left:auto;font-size:.85rem;color:#6a737d}
-.action-group-content{padding:.25rem .5rem;display:none;border-top:1px solid var(--border-color)}
-.action-item summary{display:flex;gap:.75rem;align-items:center;cursor:pointer;padding:.4rem .5rem}
-.action-item summary > .icon{flex-shrink:0}
-.action-item summary > strong{flex-shrink:0}
-.action-item summary > .duration{color:#6a737d}
-.action-item summary > .output-code{flex-grow:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
-.details-content{padding:.5rem 1rem 1rem 2.5rem;border-top:1px dashed var(--border-color);margin-top:.25rem}
-</style></head><body>
+    return `<!DOCTYPE html>
+<html lang="${this.t.lang}">
+<head>
+<meta charset="UTF-8">
+<title>${title}</title>
+<style>
+:root {
+    --header-height: 60px;
+    --bg-color: #fff;
+    --fg-color: #24292e;
+    --bg-alt: #f6f8fa;
+    --border-color: #e1e4e8;
+    --accent-color: #0366d6;
+}
+html[data-theme='dark'] {
+    --bg-color: #0d1117;
+    --fg-color: #c9d1d9;
+    --bg-alt: #161b22;
+    --border-color: #30363d;
+    --accent-color: #58a6ff;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.5;
+    color: var(--fg-color);
+    background-color: var(--bg-alt);
+    margin: 0;
+}
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 24px;
+    height: var(--header-height);
+    background: var(--bg-color);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+.header-left { flex: 1; text-align: left; }
+.header-center { flex: 2; display: flex; justify-content: center; }
+.header-right { flex: 1; display: flex; justify-content: flex-end; gap: .5rem; }
+#action-search {
+    width: 100%;
+    max-width: 500px;
+    font-size: 1rem;
+    padding: .5rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+.filter-btn {
+    font-size: .9rem;
+    padding: .5rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: 0;
+    cursor: pointer;
+}
+.filter-btn.active {
+    background: var(--accent-color);
+    color: #fff;
+    border-color: var(--accent-color);
+}
+.tab-bar {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-color);
+    padding: 0 24px;
+}
+.tab-btn {
+    padding: 1rem 1.5rem;
+    cursor: pointer;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: 0;
+    font-size: 1rem;
+    color: var(--fg-color);
+}
+.tab-btn.active {
+    border-bottom-color: var(--accent-color);
+    font-weight: 600;
+}
+.tab-content { display: none; padding: 24px; }
+.tab-content.active { display: block; }
+.report-section > h2 {
+    margin: 2rem 0 1rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+.report-section:first-child > h2 { margin-top: 0; }
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1rem 0;
+}
+th, td {
+    border: 1px solid var(--border-color);
+    padding: .6em 1em;
+    text-align: left;
+    vertical-align: top;
+}
+th { background-color: var(--bg-alt); }
+pre {
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 1rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+}
+code {
+    font-family: monospace;
+    background-color: rgba(27,31,35,.07);
+    border-radius: 6px;
+    padding: .2em .4em;
+    font-size: 85%;
+}
+pre > code { padding: 0; background: 0; border: 0; }
+.code-block {
+    position: relative;
+    margin-top: .5rem;
+}
+.copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+    background: var(--bg-alt);
+    border: 1px solid var(--border-color);
+    color: var(--fg-color);
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .2s;
+}
+.code-block:hover .copy-btn { opacity: 1; }
+.copy-btn:active { background: var(--border-color); }
+.copy-btn[disabled] { opacity: .5; cursor: default; }
+.action-group {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 4px;
+    overflow: hidden;
+    background: var(--bg-color);
+}
+.action-group-summary {
+    display: flex;
+    gap: .75rem;
+    align-items: center;
+    padding: .5rem 1rem;
+    cursor: pointer;
+    background: var(--bg-alt);
+}
+.action-group-summary:hover { background-color: var(--border-color); }
+.action-group-summary > .icon { font-size: 1.2em; flex-shrink: 0; }
+.action-group-summary > .label-code {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background-color: var(--bg-color);
+    padding: .1em .5em;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    font-size: .9em;
+}
+.action-group-stats {
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: .85rem;
+    color: #6a737d;
+}
+.action-group-content {
+    display: none;
+    border-top: 1px solid var(--border-color);
+    padding: .5rem;
+}
+.action-item { border-bottom: 1px solid var(--border-color); }
+.action-item:last-child { border-bottom: none; }
+.action-item summary {
+    display: flex;
+    gap: .75rem;
+    align-items: center;
+    cursor: pointer;
+    padding: .4rem .5rem;
+}
+.action-item summary:hover { background: var(--bg-alt); }
+.action-item summary > .icon { flex-shrink: 0; }
+.action-item summary > strong { flex-shrink: 0; }
+.action-item summary > .duration { color: #6a737d; }
+.action-item summary > .output-code {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    font-size: .9em;
+}
+.details-content {
+    padding: 0 1rem 1rem 2.5rem;
+    margin-top: .5rem;
+}
+.details-content h4 { margin-bottom: .25rem; }
+</style>
+</head>
+<body>
 <header class="page-header">
     <div class="header-left"><h1 class="header-title">${title}</h1></div>
     <div class="header-center"><input type="text" id="action-search" placeholder="${searchPlaceholder}" style="display:none;"></div>
@@ -334,7 +529,7 @@ pre>code{padding:0;background:0;border:0}
     <div id="tab-actions" class="tab-content">${actionsBody}</div>
 </main>
 <script>
-document.addEventListener('DOMContentLoaded',()=>{
+document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.querySelectorAll('.tab-btn');
     const contents = document.querySelectorAll('.tab-content');
     const searchInput = document.getElementById('action-search');
@@ -365,7 +560,7 @@ document.addEventListener('DOMContentLoaded',()=>{
                 const searchContent = item.dataset.searchContent.toLowerCase();
                 const showByQuery = !query || searchContent.includes(query);
                 item.style.display = showByQuery ? '' : 'none';
-                if(showByQuery) matchCount++;
+                if (showByQuery) matchCount++;
             });
 
             group.style.display = showByView && (matchCount > 0) ? '' : 'none';
@@ -393,7 +588,36 @@ document.addEventListener('DOMContentLoaded',()=>{
             content.style.display = content.style.display === 'block' ? 'none' : 'block';
         });
     });
+
+    document.querySelectorAll('.copy-btn').forEach(button => {
+        button.addEventListener('click', e => {
+            const targetButton = e.currentTarget;
+            const pre = targetButton.parentElement.querySelector('pre');
+            if (!pre) return;
+
+            const textToCopy = pre.dataset.copyContent || pre.innerText;
+
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = targetButton.innerText;
+                targetButton.innerText = targetButton.dataset.copiedText || 'Copied!';
+                targetButton.disabled = true;
+                setTimeout(() => {
+                    targetButton.innerText = originalText;
+                    targetButton.disabled = false;
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+                const originalText = targetButton.innerText;
+                targetButton.innerText = 'Error';
+                setTimeout(() => {
+                    targetButton.innerText = originalText;
+                }, 2000);
+            });
+        });
+    });
 });
-</script></body></html>`;
+</script>
+</body>
+</html>`;
   }
 }
