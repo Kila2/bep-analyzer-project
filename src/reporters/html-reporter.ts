@@ -35,9 +35,6 @@ export class HtmlReporter {
     return parseFloat((num / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
 
-  /**
-   * Safely escapes a string for use in an HTML attribute.
-   */
   private escapeAttr(text: string | undefined | null): string {
     if (text === null || text === undefined) return "";
     return String(text)
@@ -47,16 +44,22 @@ export class HtmlReporter {
       .replace(/>/g, ">");
   }
 
-  /**
-   * Creates a markdown code block from text, safely handling file URIs.
-   */
   private mdCode(text: string | undefined | null): string {
     if (text === null || text === undefined) return "`N/A`";
-    // Clean up file URIs and backticks for markdown
     const cleanedText = String(text)
       .replace(/^file:\/\//, "")
       .replace(/`/g, "'");
     return `\`${cleanedText}\``;
+  }
+
+  private renderInfoCard(titleKey: string, explanationKey: string): string {
+    const title = this.t.t(titleKey);
+    const explanation = this.t.t(explanationKey);
+    if (!explanation || !explanation.startsWith(">")) return ""; // only render if translation exists and is a blockquote
+    return `<div class="info-card">
+          <div class="info-card-title">💡 ${this.escapeAttr(title)}</div>
+          <div class="info-card-content">${marked.parse(explanation)}</div>
+      </div>`;
   }
 
   // --- Tab Content Builders ---
@@ -69,6 +72,7 @@ export class HtmlReporter {
       resolvedOutputs,
       convenienceSymlinks,
       structuredCommandLine,
+      optionsParsed,
     } = this.data;
 
     const buildStarted = this.data.buildStarted!;
@@ -83,7 +87,7 @@ export class HtmlReporter {
     ) => {
       if (!content || !content.trim()) return "";
       const title = this.t.t(titleKey);
-      return `<div class="report-section"><h2 id="${id}" data-nav-title="${title}">${title}</h2>${content}</div>`;
+      return `<div class="report-section"><h2 id="${id}" data-nav-title="${this.escapeAttr(title)}">${this.escapeAttr(title)}</h2>${content}</div>`;
     };
 
     // Summary
@@ -98,6 +102,40 @@ export class HtmlReporter {
       "summary",
       marked.parse(summaryMd),
     );
+
+    // Build Environment & Options
+    let envContent = "";
+    let envDetailsMd = `**${this.t.t("buildEnv.command")}**: ${this.mdCode(buildStarted.command)}\n\n`;
+    if (buildPatterns.length > 0) {
+      envDetailsMd += `**${this.t.t("buildEnv.targets")}**: ${this.mdCode(buildPatterns.join(", "))}\n\n`;
+    }
+    envContent += marked.parse(envDetailsMd);
+
+    if (workspaceStatus && workspaceStatus.item.length > 0) {
+      let wsMd = `| Key | Value |\n|---|---|\n`;
+      workspaceStatus.item.forEach((item) => {
+        wsMd += `| ${this.mdCode(item.key)} | ${this.mdCode(item.value)} |\n`;
+      });
+      envContent += marked.parse(wsMd);
+    }
+    if (
+      optionsParsed?.explicitCmdLine &&
+      optionsParsed.explicitCmdLine.length > 0
+    ) {
+      envContent += `<h3>${this.t.t("buildEnv.explicitOptions")}</h3><pre><code>${this.escapeAttr(optionsParsed.explicitCmdLine.join("\n"))}</code></pre>`;
+    }
+    if (structuredCommandLine) {
+      const cmd = structuredCommandLine.sections
+        .flatMap(
+          (s) =>
+            s.chunkList?.chunk ||
+            s.optionList?.option.map((o) => o.combinedForm) ||
+            [],
+        )
+        .join(" ");
+      envContent += `<h3>${this.t.t("buildEnv.canonicalCommandLine")}</h3><pre><code>${this.escapeAttr(cmd)}</code></pre>`;
+    }
+    html += renderSection("buildEnv.title", "environment", envContent);
 
     // Performance
     if (buildMetrics) {
@@ -127,24 +165,41 @@ export class HtmlReporter {
       perfContent += marked.parse(mainPerfMd);
 
       if (
-        buildMetrics.actionSummary.actionCacheStatistics?.missDetails.length
+        buildMetrics.actionSummary.actionCacheStatistics?.missDetails?.length
       ) {
         let missMd = `| Reason | Count |\n|---|---|\n`;
-        buildMetrics.actionSummary.actionCacheStatistics.missDetails.forEach(
-          (d) => {
-            const reasonKey = `performanceMetrics.cacheMissReason.${d.reason?.replace(/[^a-zA-Z0-9]/g, "")}`;
-            missMd += `| ${this.t.t(reasonKey, { reason: d.reason ?? "" })} | ${this.formatNumber(d.count ?? 0)} |\n`;
-          },
-        );
-        perfContent += `<details><summary>${this.t.t("performanceMetrics.cacheMissBreakdown")}</summary>${marked.parse(missMd)}</details>`;
+        const missDetails =
+          buildMetrics.actionSummary.actionCacheStatistics.missDetails
+            .filter((d) => (d.count ?? 0) > 0)
+            .sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+
+        missDetails.forEach((d) => {
+          const pascalCaseReason = d
+            .reason!.replace(/_/g, " ")
+            .toLowerCase()
+            .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase())
+            .replace(/\s/g, "");
+          const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
+          const reason = this.t.t(reasonKey, { reason: d.reason! });
+          missMd += `| ${reason} | ${this.formatNumber(d.count ?? 0)} |\n`;
+        });
+        perfContent += `<details open><summary>${this.t.t("performanceMetrics.cacheMissBreakdown")}</summary><div>
+            ${this.renderInfoCard("performanceMetrics.cacheMissBreakdown", "performanceMetrics.cacheMissReason.explanation")}
+            ${marked.parse(missMd)}
+        </div></details>`;
       }
       if (buildMetrics.memoryMetrics?.garbageMetrics) {
         let gcMd = `| Type | Collected |\n|---|---|\n`;
-        buildMetrics.memoryMetrics.garbageMetrics.forEach(
-          (m) =>
-            (gcMd += `| ${m.type} | ${this.formatBytes(m.garbageCollected)} |\n`),
-        );
-        perfContent += `<details><summary>${this.t.t("performanceMetrics.gcByType")}</summary>${marked.parse(gcMd)}</details>`;
+        buildMetrics.memoryMetrics.garbageMetrics.forEach((m) => {
+          const pascalCaseType = m.type.replace(/\s/g, "");
+          const typeKey = `performanceMetrics.gcType.${pascalCaseType}`;
+          const type = this.t.t(typeKey, { type: m.type });
+          gcMd += `| ${type} | ${this.formatBytes(m.garbageCollected)} |\n`;
+        });
+        perfContent += `<details open><summary>${this.t.t("performanceMetrics.gcByType")}</summary><div>
+            ${this.renderInfoCard("performanceMetrics.gcByType", "performanceMetrics.gcExplanation")}
+            ${marked.parse(gcMd)}
+        </div></details>`;
       }
       html += renderSection(
         "performanceMetrics.title",
@@ -171,36 +226,103 @@ export class HtmlReporter {
 
     // Build Graph
     if (buildMetrics?.buildGraphMetrics) {
+      let graphContent = "";
       let graphMd = `| Metric | Value |\n|---|---|\n`;
-      const { actionCount, outputArtifactCount } =
+      const { actionCount, outputArtifactCount, builtValues } =
         buildMetrics.buildGraphMetrics;
       graphMd += `| ${this.t.t("buildGraphMetrics.totalActions")} | ${this.formatNumber(actionCount)} |\n`;
       graphMd += `| ${this.t.t("buildGraphMetrics.totalOutputs")} | ${this.formatNumber(outputArtifactCount)} |\n`;
+      graphContent += marked.parse(graphMd);
+
+      if (builtValues && builtValues.length > 0) {
+        let skyFunctionsMd = `| ${this.t.t("buildGraphMetrics.skyFunction")} | ${this.t.t("buildGraphMetrics.evalCount")} |\n|---|---|\n`;
+        builtValues
+          .sort((a, b) => Number(b.count) - Number(a.count))
+          .slice(0, 10)
+          .forEach((v) => {
+            skyFunctionsMd += `| ${this.mdCode(v.skyfunctionName)} | ${this.formatNumber(v.count)} |\n`;
+          });
+        graphContent += `<details open><summary>${this.t.t("buildGraphMetrics.topSkyFunctions")}</summary><div>
+                ${this.renderInfoCard("buildGraphMetrics.topSkyFunctions", "buildGraphMetrics.skyFunctionsExplanation")}
+                ${marked.parse(skyFunctionsMd)}
+            </div></details>`;
+      }
       html += renderSection(
         "buildGraphMetrics.title",
         "graph-metrics",
-        marked.parse(graphMd),
+        graphContent,
       );
     }
 
+    // Worker & Network Metrics
+    if (buildMetrics) {
+      const hasWorkerMetrics =
+        buildMetrics.workerMetrics && buildMetrics.workerMetrics.length > 0;
+      const hasNetworkMetrics =
+        buildMetrics.networkMetrics &&
+        buildMetrics.networkMetrics.systemNetworkStats;
+      if (hasWorkerMetrics || hasNetworkMetrics) {
+        let wnContent = this.renderInfoCard(
+          "workerNetworkMetrics.title",
+          "workerNetworkMetrics.explanation",
+        );
+        let wnMd = `| Metric | Value |\n|---|---|\n`;
+        if (hasWorkerMetrics) {
+          const totalActions = buildMetrics.workerMetrics!.reduce(
+            (sum, w) => sum + Number(w.actionsExecuted),
+            0,
+          );
+          wnMd += `| ${this.t.t("workerNetworkMetrics.totalWorkerActions")} | ${this.formatNumber(totalActions)} |\n`;
+        }
+        if (hasNetworkMetrics) {
+          const { bytesSent, bytesRecv } =
+            buildMetrics.networkMetrics!.systemNetworkStats!;
+          const traffic = `${this.t.t("workerNetworkMetrics.sent")}: ${this.formatBytes(bytesSent)}, ${this.t.t("workerNetworkMetrics.received")}: ${this.formatBytes(bytesRecv)}`;
+          wnMd += `| ${this.t.t("workerNetworkMetrics.networkTraffic")} | ${traffic} |\n`;
+        }
+        wnContent += marked.parse(wnMd);
+        html += renderSection(
+          "workerNetworkMetrics.title",
+          "worker-network",
+          wnContent,
+        );
+      }
+    }
+
     // Slowest Actions
-    let slowestMd = `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | ${this.t.t("slowestActions.outputTarget")} |\n|---|---|---|\n`;
-    actions
-      .sort(
-        (a, b) =>
-          parseInt(b.actionResult?.executionInfo.wallTimeMillis || "0", 10) -
-          parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10),
-      )
-      .slice(0, 10)
-      .forEach((a) => {
-        const outputTarget = a.primaryOutput?.uri || a.label;
-        slowestMd += `| ${this.formatDuration(parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(a.mnemonic)} | ${this.mdCode(outputTarget)} |\n`;
+    if (actions.length > 0) {
+      let slowestMd = `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | ${this.t.t("slowestActions.outputTarget")} |\n|---|---|---|\n`;
+      actions
+        .sort(
+          (a, b) =>
+            parseInt(b.actionResult?.executionInfo.wallTimeMillis || "0", 10) -
+            parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10),
+        )
+        .slice(0, 10)
+        .forEach((a) => {
+          const outputTarget = a.primaryOutput?.uri || a.label;
+          slowestMd += `| ${this.formatDuration(parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(a.mnemonic)} | ${this.mdCode(outputTarget)} |\n`;
+        });
+      html += renderSection(
+        "slowestActions.title",
+        "slowest-actions",
+        marked.parse(slowestMd),
+      );
+    }
+
+    // Build Outputs
+    if (resolvedOutputs && resolvedOutputs.size > 0) {
+      let outputsContent = "";
+      resolvedOutputs.forEach((files, target) => {
+        outputsContent += `<h3>${this.escapeAttr(target)}</h3>`;
+        outputsContent += `<pre><code>${this.escapeAttr(files.join("\n"))}</code></pre>`;
       });
-    html += renderSection(
-      "slowestActions.title",
-      "slowest-actions",
-      marked.parse(slowestMd),
-    );
+      html += renderSection(
+        "buildOutputs.title",
+        "build-outputs",
+        outputsContent,
+      );
+    }
 
     return html;
   }
@@ -308,11 +430,14 @@ export class HtmlReporter {
 <style>
 :root {
     --header-height: 60px;
+    --sidebar-width: 240px;
     --bg-color: #fff;
     --fg-color: #24292e;
     --bg-alt: #f6f8fa;
     --border-color: #e1e4e8;
     --accent-color: #0366d6;
+    --info-bg: #f1f8ff;
+    --info-border: #c8e1ff;
 }
 html[data-theme='dark'] {
     --bg-color: #0d1117;
@@ -320,6 +445,8 @@ html[data-theme='dark'] {
     --bg-alt: #161b22;
     --border-color: #30363d;
     --accent-color: #58a6ff;
+    --info-bg: #161b22;
+    --info-border: #30363d;
 }
 body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -327,6 +454,11 @@ body {
     color: var(--fg-color);
     background-color: var(--bg-alt);
     margin: 0;
+}
+.page-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
 }
 .page-header {
     display: flex;
@@ -364,11 +496,54 @@ body {
     color: #fff;
     border-color: var(--accent-color);
 }
+.content-wrapper {
+    display: flex;
+    flex-grow: 1;
+}
+#report-nav {
+    width: var(--sidebar-width);
+    flex-shrink: 0;
+    position: sticky;
+    top: var(--header-height);
+    height: calc(100vh - var(--header-height));
+    overflow-y: auto;
+    padding: 1.5rem;
+    border-right: 1px solid var(--border-color);
+    background-color: var(--bg-color);
+}
+#report-nav ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+#report-nav li a {
+    display: block;
+    padding: .4rem 1rem;
+    color: var(--fg-color);
+    text-decoration: none;
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+}
+#report-nav li a:hover {
+    background-color: var(--bg-alt);
+}
+#report-nav li a.active {
+    background-color: var(--info-bg);
+    border-left-color: var(--accent-color);
+    font-weight: 600;
+}
+main {
+    flex-grow: 1;
+    max-width: calc(100% - var(--sidebar-width));
+}
 .tab-bar {
     display: flex;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-color);
     padding: 0 24px;
+    position: sticky;
+    top: var(--header-height);
+    z-index: 99;
 }
 .tab-btn {
     padding: 1rem 1.5rem;
@@ -387,12 +562,31 @@ body {
 .tab-content.active { display: block; }
 .report-section > h2 {
     margin: 2rem 0 1rem;
-    padding-bottom: .5rem;
+    padding-top: 1rem;
     border-bottom: 1px solid var(--border-color);
 }
 .report-section:first-child > h2 { margin-top: 0; }
-details > summary { list-style: none; cursor: pointer; }
+.report-section h3 { margin-top: 1.5rem; }
+details {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-top: 1rem;
+    background-color: var(--bg-color);
+}
+details > summary {
+    font-weight: bold;
+    padding: .75rem 1rem;
+    list-style: none;
+    cursor: pointer;
+    background-color: var(--bg-alt);
+}
 details > summary::-webkit-details-marker { display: none; }
+details[open] > summary {
+    border-bottom: 1px solid var(--border-color);
+}
+details > div {
+    padding: 1rem;
+}
 table {
     border-collapse: collapse;
     width: 100%;
@@ -509,42 +703,121 @@ pre > code { padding: 0; background: 0; border: 0; }
     margin-top: .5rem;
 }
 .details-content h4 { margin-bottom: .25rem; }
+.info-card {
+    background-color: var(--info-bg);
+    border: 1px solid var(--info-border);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+.info-card-title {
+    font-weight: bold;
+    font-size: 1.1em;
+    margin-bottom: 0.5rem;
+}
+.info-card-content p {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+}
+.info-card-content blockquote {
+    margin-left: 0;
+    padding-left: 1em;
+    border-left: 4px solid var(--info-border);
+    color: var(--fg-color);
+    opacity: 0.8;
+}
+
+@media (max-width: 960px) {
+    #report-nav {
+        display: none;
+    }
+    main {
+        max-width: 100%;
+    }
+}
 </style>
 </head>
 <body>
-<header class="page-header">
-    <div class="header-left"><h1 class="header-title">${title}</h1></div>
-    <div class="header-center"><input type="text" id="action-search" placeholder="${searchPlaceholder}" style="display:none;"></div>
-    <div class="header-right">
-        <button class="filter-btn" data-filter="all" style="display:none;">All Actions</button>
-        <button class="filter-btn" data-filter="failed" style="display:none;">Failed Actions</button>
+<div class="page-container">
+    <header class="page-header">
+        <div class="header-left"><h1 class="header-title">${title}</h1></div>
+        <div class="header-center"><input type="text" id="action-search" placeholder="${searchPlaceholder}" style="display:none;"></div>
+        <div class="header-right">
+            <button class="filter-btn" data-filter="all" style="display:none;">All Actions</button>
+            <button class="filter-btn" data-filter="failed" style="display:none;">Failed Actions</button>
+        </div>
+    </header>
+    <div class="content-wrapper">
+        <nav id="report-nav"></nav>
+        <main>
+            <div class="tab-bar">
+                <button class="tab-btn active" data-tab="report">Report</button>
+                <button class="tab-btn" data-tab="actions">Action Details</button>
+            </div>
+            <div id="tab-report" class="tab-content active">${reportBody}</div>
+            <div id="tab-actions" class="tab-content">${actionsBody}</div>
+        </main>
     </div>
-</header>
-<div class="tab-bar">
-    <button class="tab-btn active" data-tab="report">Report</button>
-    <button class="tab-btn" data-tab="actions">Action Details</button>
 </div>
-<main>
-    <div id="tab-report" class="tab-content active">${reportBody}</div>
-    <div id="tab-actions" class="tab-content">${actionsBody}</div>
-</main>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.querySelectorAll('.tab-btn');
     const contents = document.querySelectorAll('.tab-content');
     const searchInput = document.getElementById('action-search');
     const filterButtons = document.querySelectorAll('.filter-btn');
+    const reportNav = document.getElementById('report-nav');
+    const mainContent = document.querySelector('main');
 
     const switchTab = (tabId) => {
         tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
         contents.forEach(c => c.classList.toggle('active', c.id === \`tab-\${tabId}\`));
         const isActionsTab = tabId === 'actions';
+        const isReportTab = tabId === 'report';
         searchInput.style.display = isActionsTab ? 'block' : 'none';
         filterButtons.forEach(b => b.style.display = isActionsTab ? 'block' : 'none');
+        reportNav.style.display = isReportTab ? '' : 'none';
+        mainContent.style.maxWidth = isReportTab ? '' : '100%';
     };
 
     tabs.forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
 
+    // Sidebar Navigation
+    const reportTab = document.getElementById('tab-report');
+    const headers = reportTab.querySelectorAll('h2[data-nav-title]');
+    const navList = document.createElement('ul');
+    const navItems = [];
+    headers.forEach(header => {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = \`#\${header.id}\`;
+        a.textContent = header.dataset.navTitle;
+        a.dataset.targetId = header.id;
+        li.appendChild(a);
+        navList.appendChild(li);
+        navItems.push({ a, header });
+    });
+    if(reportNav) reportNav.appendChild(navList);
+
+    const onScroll = () => {
+        let currentSection = null;
+        const scrollPos = window.scrollY + mainContent.offsetTop + 100;
+
+        for (const item of navItems) {
+            if (item.header.offsetTop <= scrollPos) {
+                currentSection = item.a;
+            } else {
+                break;
+            }
+        }
+        navItems.forEach(item => item.a.classList.remove('active'));
+        if (currentSection) {
+            currentSection.classList.add('active');
+        }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    // Action Details Filtering
     const actionGroups = document.querySelectorAll('.action-group');
     const filterState = { query: '', view: 'all' };
 
@@ -591,6 +864,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.querySelectorAll('.copy-btn').forEach(button => {
         button.addEventListener('click', e => {
+            e.stopPropagation(); // prevent details from toggling
             const targetButton = e.currentTarget;
             const pre = targetButton.parentElement.querySelector('pre');
             if (!pre) return;

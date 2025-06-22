@@ -44,7 +44,16 @@
     "peakHeap": "Peak Heap Size (Post GC)",
     "usedHeapPostBuild": "Used Heap (Post Build)",
     "gcByType": "Garbage Collection by Type",
-    "totalGc": "Total Garbage Collected"
+    "totalGc": "Total Garbage Collected",
+    "gcType": {
+      "G1YoungGeneration": "G1 Young Generation",
+      "G1OldGeneration": "G1 Old Generation",
+      "ZGC": "ZGC",
+      "Shenandoah": "Shenandoah",
+      "ParNew": "ParNew",
+      "ConcurrentMarkSweep": "ConcurrentMarkSweep"
+    },
+    "gcExplanation": "> **What is Garbage Collection (GC)?** It's the process by which the Java Virtual Machine (JVM) reclaims memory occupied by objects that are no longer in use. Frequent or large GC events can pause the build, impacting performance. `Young Generation` GC is typically fast and frequent, cleaning up short-lived objects. `Old Generation` GC is less frequent but can cause longer pauses, as it scans long-lived objects."
   },
   "artifactMetrics": {
     "title": "Artifact Metrics",
@@ -69,7 +78,8 @@
     "totalWorkerActions": "Total Worker Actions",
     "networkTraffic": "Network Traffic",
     "sent": "Sent",
-    "received": "Received"
+    "received": "Received",
+    "explanation": "> **What are Bazel Workers?** Workers are long-running processes that Bazel can send individual action requests to. For tools that have a high startup cost (like compilers or linters), using persistent workers can dramatically speed up builds by avoiding repeated process creation."
   },
   "buildToolLogs": {
     "title": "Build Tool Logs",

@@ -44,7 +44,16 @@
     "peakHeap": "峰值堆大小 (GC后)",
     "usedHeapPostBuild": "构建后已用堆大小",
     "gcByType": "按类型分的垃圾回收",
-    "totalGc": "总垃圾回收量"
+    "totalGc": "总垃圾回收量",
+    "gcType": {
+      "G1YoungGeneration": "G1 新生代",
+      "G1OldGeneration": "G1 老年代",
+      "ZGC": "ZGC",
+      "Shenandoah": "Shenandoah",
+      "ParNew": "ParNew",
+      "ConcurrentMarkSweep": "ConcurrentMarkSweep"
+    },
+    "gcExplanation": "> **什么是垃圾回收 (GC)?** 这是 Java 虚拟机 (JVM) 回收不再使用的对象所占用内存的过程。频繁或大量的 GC 事件会暂停构建，影响性能。`新生代 (Young Generation)` GC 通常速度快且频繁，用于清理生命周期短的对象。`老年代 (Old Generation)` GC 频率较低，但可能会导致更长的暂停，因为它需要扫描生命周期长的对象。"
   },
   "artifactMetrics": {
     "title": "产物指标",
@@ -69,7 +78,8 @@
     "totalWorkerActions": "Worker 执行的动作总数",
     "networkTraffic": "网络流量",
     "sent": "发送",
-    "received": "接收"
+    "received": "接收",
+    "explanation": "> **什么是 Bazel Worker?** Worker 是一个由 Bazel 启动并管理的长期运行的进程，它可以接收并处理单个构建动作请求。对于那些启动成本很高的工具（如编译器、Linter等），使用常驻的 Worker 可以避免重复创建进程，从而极大地提升构建速度。"
   },
   "buildToolLogs": {
     "title": "构建工具日志",
