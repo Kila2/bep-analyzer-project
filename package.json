@@ -13,7 +13,7 @@
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "proto:sync": "node scripts/sync-protos.js",
-    "proto:gen-ts": "protoc --plugin=protoc-gen-ts_proto=$(pwd)/node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=src/proto/generated --ts_proto_opt=esModuleInterop=true,forceLong=string,outputServices=false -I proto $(find proto -type f -name '*.proto')"
+    "proto:gen-ts": "protoc --plugin=protoc-gen-ts_proto=$(pwd)/node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=src/proto/generated --ts_proto_opt=esModuleInterop=true,forceLong=string,outputServices=false,snakeToCamel=true -I proto $(find proto -type f -name '*.proto')"
   },
   "keywords": [
     "bazel",
