@@ -29,6 +29,14 @@ function stripAnsi(str: string): string {
   );
 }
 
+function getFileStem(filePath: string): string {
+  if (!filePath) return "";
+  // Get 'file.ext' from '/path/to/file.ext'
+  const basename = filePath.split(/[\\/]/).pop() || "";
+  // Get 'file' from 'file.ext'
+  return basename.split(".").shift() || "";
+}
+
 export class StaticBepAnalyzer {
   protected buildStarted: BuildStarted | null = null;
   protected buildFinished: BuildFinished | null = null;
@@ -47,6 +55,7 @@ export class StaticBepAnalyzer {
   private readonly convenienceSymlinks: ConvenienceSymlink[] = [];
   private readonly topLevelOutputSets: Map<string, string[]> = new Map();
   private readonly progressStderrCache: Map<string, string> = new Map();
+  private readonly actionStrategyCache: Map<string, string> = new Map();
 
   constructor(
     protected actionDetails: "none" | "failed" | "all" = "failed",
@@ -100,6 +109,24 @@ export class StaticBepAnalyzer {
 
     if (id.progress && (data.progress?.stderr || data.progress?.stdout)) {
       const fullStderr = data.progress.stderr || data.progress.stdout || "";
+
+      // --- New: Parse stderr for execution strategies ---
+      const actionLines = fullStderr.split("\n");
+      for (const line of actionLines) {
+        const strippedLine = stripAnsi(line).trim();
+        // Regex to find lines like: `Compiling path/to/file.cpp; 1s local`
+        const actionMatch = strippedLine.match(
+          /^(\s*\w+\s+.+?);.*?(?:(\d+s)\s+([a-zA-Z\s-]+\w))?$/i,
+        );
+        if (actionMatch && actionMatch[3]) {
+          const description = actionMatch[1].trim();
+          const strategy = actionMatch[3].trim();
+          const stem = getFileStem(description);
+          if (stem && strategy) {
+            this.actionStrategyCache.set(stem, strategy);
+          }
+        }
+      }
       const rawLines = fullStderr.split("\n");
 
       // Strict filtering for static analysis: only keep lines with explicit "warning:" or "error:".
@@ -154,6 +181,16 @@ export class StaticBepAnalyzer {
                 wallTimeMillis: wallTimeMillis,
               },
             };
+          }
+
+          // --- New: Attach cached strategy ---
+          const outputUri = action.primaryOutput?.uri || "";
+          if (outputUri) {
+            const stem = getFileStem(outputUri);
+            if (this.actionStrategyCache.has(stem)) {
+              action.strategy = this.actionStrategyCache.get(stem);
+              this.actionStrategyCache.delete(stem); // Clean up cache
+            }
           }
 
           const shouldProcessDetails =

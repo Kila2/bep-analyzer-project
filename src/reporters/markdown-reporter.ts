@@ -391,9 +391,9 @@ class MarkdownBuilder {
 
     this.h2("slowestActions.title");
     this.a(
-      `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | ${this.t.t("slowestActions.outputTarget")} |`,
+      `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | Strategy | ${this.t.t("slowestActions.outputTarget")} |`,
     );
-    this.a("|---|---|---|");
+    this.a("|---|---|---|---|");
     actions
       .slice()
       .sort(
@@ -406,7 +406,7 @@ class MarkdownBuilder {
         const output =
           action.primaryOutput?.uri.replace("file://", "") || action.label;
         this.a(
-          `| ${this.formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(action.mnemonic)} | ${this.mdCode(output)} |`,
+          `| ${this.formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(action.mnemonic)} | ${this.mdCode(action.strategy || "N/A")} | ${this.mdCode(output)} |`,
         );
       });
     this.a();
@@ -471,6 +471,9 @@ class MarkdownBuilder {
         `- **${this.t.t("actionDetails.primaryOutput")}**: ${this.mdCode(primaryOutput)}`,
       );
       this.a(`- **${this.t.t("actionDetails.duration")}**: ${duration}`);
+      if (action.strategy) {
+        this.a(`- **Strategy**: ${this.mdCode(action.strategy)}`);
+      }
 
       if (action.argv && action.argv.length > 0) {
         this.a(`<details>`);

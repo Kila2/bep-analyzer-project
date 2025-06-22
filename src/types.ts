@@ -61,6 +61,7 @@ export interface Action {
   type?: string;
   startTime?: string;
   endTime?: string;
+  strategy?: string;
 }
 
 export interface File {

@@ -339,7 +339,7 @@ export class HtmlReporter {
 
     // Slowest Actions
     if (actions.length > 0) {
-      let slowestMd = `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | ${this.t.t("slowestActions.outputTarget")} |\n|---|---|---|\n`;
+      let slowestMd = `| ${this.t.t("slowestActions.duration")} | ${this.t.t("slowestActions.actionType")} | Strategy | ${this.t.t("slowestActions.outputTarget")} |\n|---|---|---|---|\n`;
       actions
         .sort(
           (a, b) =>
@@ -349,7 +349,7 @@ export class HtmlReporter {
         .slice(0, 10)
         .forEach((a) => {
           const outputTarget = a.primaryOutput?.uri || a.label;
-          slowestMd += `| ${this.formatDuration(parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(a.mnemonic)} | ${this.mdCode(outputTarget)} |\n`;
+          slowestMd += `| ${this.formatDuration(parseInt(a.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(a.mnemonic)} | ${this.mdCode(a.strategy || "N/A")} | ${this.mdCode(outputTarget)} |\n`;
         });
       html += renderSection(
         "slowestActions.title",
@@ -417,11 +417,13 @@ export class HtmlReporter {
               action.label ||
               "N/A"
             ).replace(/^file:\/\//, "");
-            const searchContent = `${action.mnemonic} ${output}`;
+            const searchContent = `${action.mnemonic} ${output} ${action.strategy || ""}`;
             html += `<details class="action-item" data-search-content="${this.escapeAttr(searchContent)}"><summary>`;
             html += `<span class="icon">${action.success ? "✅" : "❌"}</span>`;
             html += `<strong>${this.escapeAttr(action.mnemonic)}</strong>`;
             html += `<span class="duration">${this.formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10))}</span>`;
+            if (action.strategy)
+              html += `<span class="strategy">${this.escapeAttr(action.strategy)}</span>`;
             html += `<code class="output-code" title="${this.escapeAttr(output)}">${this.escapeAttr(output)}</code>`;
             html += `</summary><div class="details-content">`;
             if (command) {
@@ -752,6 +754,15 @@ pre > code { padding: 0; background: 0; border: 0; }
 .action-item summary:hover { background: var(--bg-alt); }
 .action-item summary > .icon { flex-shrink: 0; }
 .action-item summary > strong { flex-shrink: 0; }
+.action-item summary > .strategy {
+    color: var(--accent-color);
+    font-size: .8em;
+    font-weight: bold;
+    border: 1px solid var(--accent-color);
+    border-radius: 4px;
+    padding: 0 .4em;
+    margin: 0 .5rem;
+}
 .action-item summary > .duration { color: #6a737d; }
 .action-item summary > .output-code {
     flex-grow: 1;

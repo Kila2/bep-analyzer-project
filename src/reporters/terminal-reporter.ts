@@ -585,7 +585,7 @@ export class TerminalReporter {
               ),
             );
             console.log(
-              `  [${index + 1}] ${this.t.t("actionDetails.type")}: ${chalk.blue(action.mnemonic)} | ${this.t.t("actionDetails.duration")}: ${chalk.yellow(duration)}`,
+              `  [${index + 1}] ${this.t.t("actionDetails.type")}: ${chalk.blue(action.mnemonic)} | ${this.t.t("actionDetails.duration")}: ${chalk.yellow(duration)}${action.strategy ? ` | Strategy: ${chalk.cyan(action.strategy)}` : ""}`,
             );
 
             if (action.primaryOutput?.uri) {
@@ -684,19 +684,20 @@ export class TerminalReporter {
       let colWidths: (number | null)[];
       if (this.wideLevel >= 2) {
         // -ww
-        colWidths = [12, 20, null]; // Let the last column auto-size
+        colWidths = [12, 20, 15, null]; // Let the last column auto-size
       } else if (this.wideLevel === 1) {
         // -w
-        colWidths = [12, 20, 100];
+        colWidths = [12, 20, 15, 90];
       } else {
         // default
-        colWidths = [12, 20, 60];
+        colWidths = [12, 20, 15, 50];
       }
 
       const table = new Table({
         head: [
           this.t.t("slowestActions.duration"),
           this.t.t("slowestActions.actionType"),
+          "Strategy",
           this.t.t("slowestActions.outputTarget"),
         ],
         colWidths,
@@ -718,6 +719,7 @@ export class TerminalReporter {
             ),
           ),
           action.mnemonic,
+          action.strategy || "N/A",
           action.primaryOutput?.uri.replace("file://", "") ||
             action.label ||
             "N/A",
