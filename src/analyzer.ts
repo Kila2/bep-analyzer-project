@@ -22,6 +22,7 @@ import {
   Aborted,
   File,
 } from "./types";
+import { OutputGroup } from "./proto/generated/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream";
 
 function stripAnsi(str: string): string {
   // This helper is used locally for filtering logic, not for the final output
@@ -269,7 +270,8 @@ export class StaticBepAnalyzer {
             ) {
               const fileSetIds =
                 completedData.outputGroup?.flatMap(
-                  (group) => group.fileSets?.map((fs) => fs.id) || [],
+                  (group: OutputGroup) =>
+                    group.fileSets?.map((fs) => fs.id) || [],
                 ) || [];
               if (fileSetIds.length > 0) {
                 this.topLevelOutputSets.set(
@@ -305,9 +307,7 @@ export class StaticBepAnalyzer {
         break;
       case "convenienceSymlinksIdentified":
         if (data.convenienceSymlinksIdentified?.convenienceSymlinks) {
-          this.convenienceSymlinks.push(
-            ...data.convenienceSymlinksIdentified.convenienceSymlinks,
-          );
+          this.convenienceSymlinks.push(data.convenienceSymlinksIdentified);
         }
         break;
       case "configuration":

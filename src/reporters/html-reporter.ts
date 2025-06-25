@@ -2,7 +2,10 @@ import { ReportData, Action } from "../types";
 import { Translator } from "../i18n/translator";
 import AnsiToHtml from "ansi-to-html";
 import { marked } from "marked";
-import { ActionCacheStatistics_MissReason } from "../proto/generated/src/main/protobuf/action_cache";
+import {
+  ActionCacheStatistics_MissReason,
+  actionCacheStatistics_MissReasonToJSON,
+} from "../proto/generated/src/main/protobuf/action_cache";
 
 export class HtmlReporter {
   private ansiConverter: AnsiToHtml;
@@ -208,7 +211,7 @@ export class HtmlReporter {
             .sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
 
         missDetails.forEach((d) => {
-          const reasonString = ActionCacheStatistics_MissReason[d.reason!];
+          const reasonString = actionCacheStatistics_MissReasonToJSON(d.reason);
           const pascalCaseReason = reasonString
             .replace(/_/g, " ")
             .toLowerCase()

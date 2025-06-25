@@ -2,7 +2,10 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import { ReportData, Action, TestSummary } from "../types";
 import { Translator } from "../i18n/translator";
-import { ActionCacheStatistics_MissReason } from "../proto/generated/src/main/protobuf/action_cache";
+import {
+  ActionCacheStatistics_MissReason,
+  actionCacheStatistics_MissReasonToJSON,
+} from "../proto/generated/src/main/protobuf/action_cache";
 import {
   TestStatus,
   ConvenienceSymlink,
@@ -208,167 +211,176 @@ export class TerminalReporter {
     }
 
     // --- Performance Metrics ---
-    if (buildMetrics?.actionSummary) {
+    if (buildMetrics) {
       console.log(
         chalk.bold.cyan(`\n--- ${this.t.t("performanceMetrics.title")} ---`),
       );
       const metrics = buildMetrics;
-      const perfTable = new Table({
-        style: { head: ["cyan"], border: ["gray"] },
-      });
-      perfTable.push(
-        [
-          {
-            colSpan: 2,
-            content: chalk.bold.white(
-              this.t.t("performanceMetrics.executionCaching"),
-            ),
-          },
-        ],
-        [
-          this.t.t("performanceMetrics.actionsCreated"),
-          chalk.blue(
-            formatNumber(metrics.actionSummary?.actionsCreated || "N/A"),
-          ),
-        ],
-        [
-          this.t.t("performanceMetrics.actionsExecuted"),
-          chalk.blue(formatNumber(metrics.actionSummary?.actionsExecuted || 0)),
-        ],
-      );
-      if (metrics.actionSummary?.actionCacheStatistics) {
-        const stats = metrics.actionSummary.actionCacheStatistics;
-        const misses = stats.missDetails.reduce(
-          (s, d) => s + (Number(d.count) || 0),
-          0,
-        );
-        const hits = Number(
-          metrics.artifactMetrics?.outputArtifactsFromActionCache?.count ||
-            stats.hits ||
-            0,
-        );
-        const totalLookups = hits + misses;
-        const hitRate =
-          totalLookups > 0 ? ((hits / totalLookups) * 100).toFixed(2) : "0.00";
-        const hitRateColor = hits > 0 ? chalk.green : chalk.yellow;
-        const hitsLabel = this.t.t("performanceMetrics.actionCacheHits");
-        const missesLabel = this.t.t("performanceMetrics.actionCacheMisses");
-        perfTable.push([
-          this.t.t("performanceMetrics.actionCache"),
-          `${hitRateColor(hitRate + "%")} ${this.t.t("performanceMetrics.actionCacheHit")} (${formatNumber(hits)} ${hitsLabel} / ${formatNumber(misses)} ${missesLabel})`,
-        ]);
-
-        if (stats.missDetails && stats.missDetails.length > 0) {
-          const missRows = stats.missDetails
-            .filter((d) => Number(d.count) > 0)
-            .sort((a, b) => Number(b.count) - Number(a.count));
-
-          if (missRows.length > 0) {
-            perfTable.push([
-              {
-                colSpan: 2,
-                content: chalk.white(
-                  `  ${this.t.t("performanceMetrics.cacheMissBreakdown")}:`,
-                ),
-              },
-            ]);
-            missRows
-              .filter((detail) => detail.reason != undefined)
-              .forEach((detail) => {
-                const reasonString =
-                  ActionCacheStatistics_MissReason[detail.reason!];
-                const pascalCaseReason = reasonString
-                  .replace(/_/g, " ")
-                  .toLowerCase()
-                  .replace(/(?:^|\s)\S/g, (a: string) => a.toUpperCase())
-                  .replace(/\s/g, "");
-                const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
-                const reason = this.t.t(reasonKey, { reason: reasonString });
-                perfTable.push([
-                  `    - ${reason}`,
-                  chalk.yellow(formatNumber(detail.count ?? 0)),
-                ]);
-              });
-          }
-        }
-      }
-      if (metrics.memoryMetrics) {
-        const memRows: any[] = [];
-        if (metrics.memoryMetrics.peakPostGcHeapSize) {
-          memRows.push([
-            this.t.t("performanceMetrics.peakHeap"),
-            chalk.magenta(
-              formatBytes(metrics.memoryMetrics.peakPostGcHeapSize),
-            ),
-          ]);
-        }
-        if (metrics.memoryMetrics.usedHeapSizePostBuild) {
-          memRows.push([
-            this.t.t("performanceMetrics.usedHeapPostBuild"),
-            chalk.magenta(
-              formatBytes(metrics.memoryMetrics.usedHeapSizePostBuild),
-            ),
-          ]);
-        }
-        if (memRows.length > 0) {
-          perfTable.push([
+      if (metrics.actionSummary) {
+        const perfTable = new Table({
+          style: { head: ["cyan"], border: ["gray"] },
+        });
+        perfTable.push(
+          [
             {
               colSpan: 2,
               content: chalk.bold.white(
-                this.t.t("performanceMetrics.memoryUsage"),
+                this.t.t("performanceMetrics.executionCaching"),
               ),
             },
+          ],
+          [
+            this.t.t("performanceMetrics.actionsCreated"),
+            chalk.blue(
+              formatNumber(metrics.actionSummary.actionsCreated || "N/A"),
+            ),
+          ],
+          [
+            this.t.t("performanceMetrics.actionsExecuted"),
+            chalk.blue(formatNumber(metrics.actionSummary.actionsExecuted)),
+          ],
+        );
+        if (metrics.actionSummary.actionCacheStatistics) {
+          const stats = metrics.actionSummary.actionCacheStatistics;
+          const misses = stats.missDetails.reduce(
+            (s, d) => s + (Number(d.count) || 0),
+            0,
+          );
+          const hits = Number(
+            metrics.artifactMetrics?.outputArtifactsFromActionCache?.count ||
+              stats.hits ||
+              0,
+          );
+          const totalLookups = hits + misses;
+          const hitRate =
+            totalLookups > 0
+              ? ((hits / totalLookups) * 100).toFixed(2)
+              : "0.00";
+          const hitRateColor = hits > 0 ? chalk.green : chalk.yellow;
+          const hitsLabel = this.t.t("performanceMetrics.actionCacheHits");
+          const missesLabel = this.t.t("performanceMetrics.actionCacheMisses");
+          perfTable.push([
+            this.t.t("performanceMetrics.actionCache"),
+            `${hitRateColor(hitRate + "%")} ${this.t.t("performanceMetrics.actionCacheHit")} (${formatNumber(hits)} ${hitsLabel} / ${formatNumber(misses)} ${missesLabel})`,
           ]);
-          perfTable.push(...memRows);
-        }
 
-        if (
-          metrics.memoryMetrics.garbageMetrics &&
-          metrics.memoryMetrics.garbageMetrics.length > 0
-        ) {
-          const gcRows: any[] = [];
-          metrics.memoryMetrics.garbageMetrics
-            .sort(
-              (a, b) => Number(b.garbageCollected) - Number(a.garbageCollected),
-            )
-            .forEach((metric) => {
-              const originalType = metric.type;
-              const pascalCaseType = originalType.replace(/[^a-zA-Z0-9]/g, "");
-              const typeKey = `performanceMetrics.gcType.${pascalCaseType}`;
-              const translatedType = this.t.t(typeKey);
+          if (stats.missDetails && stats.missDetails.length > 0) {
+            const missRows = stats.missDetails
+              .filter((d) => Number(d.count) > 0)
+              .sort((a, b) => Number(b.count) - Number(a.count));
 
-              let displayType: string;
-              if (translatedType !== typeKey) {
-                // Translation found
-                if (this.t.getLanguage() === "zh") {
-                  displayType = `${translatedType} (${originalType})`;
-                } else {
-                  displayType = translatedType;
-                }
-              } else {
-                // No translation, fallback to original
-                displayType = originalType;
-              }
-
-              gcRows.push([
-                `  ${displayType}`,
-                chalk.magenta(formatBytes(metric.garbageCollected)),
+            if (missRows.length > 0) {
+              perfTable.push([
+                {
+                  colSpan: 2,
+                  content: chalk.white(
+                    `  ${this.t.t("performanceMetrics.cacheMissBreakdown")}:`,
+                  ),
+                },
               ]);
-            });
-          if (gcRows.length > 0) {
+              missRows
+                .filter((detail) => detail.reason != undefined)
+                .forEach((detail) => {
+                  const reasonString = actionCacheStatistics_MissReasonToJSON(
+                    detail.reason,
+                  );
+                  const pascalCaseReason = reasonString
+                    .replace(/_/g, " ")
+                    .toLowerCase()
+                    .replace(/(?:^|\s)\S/g, (a: string) => a.toUpperCase())
+                    .replace(/\s/g, "");
+                  const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
+                  const reason = this.t.t(reasonKey, { reason: reasonString });
+                  perfTable.push([
+                    `    - ${reason}`,
+                    chalk.yellow(formatNumber(detail.count ?? 0)),
+                  ]);
+                });
+            }
+          }
+        }
+        if (metrics.memoryMetrics) {
+          const memRows: any[] = [];
+          if (metrics.memoryMetrics.peakPostGcHeapSize) {
+            memRows.push([
+              this.t.t("performanceMetrics.peakHeap"),
+              chalk.magenta(
+                formatBytes(metrics.memoryMetrics.peakPostGcHeapSize),
+              ),
+            ]);
+          }
+          if (metrics.memoryMetrics.usedHeapSizePostBuild) {
+            memRows.push([
+              this.t.t("performanceMetrics.usedHeapPostBuild"),
+              chalk.magenta(
+                formatBytes(metrics.memoryMetrics.usedHeapSizePostBuild),
+              ),
+            ]);
+          }
+          if (memRows.length > 0) {
             perfTable.push([
               {
                 colSpan: 2,
                 content: chalk.bold.white(
-                  this.t.t("performanceMetrics.gcByType"),
+                  this.t.t("performanceMetrics.memoryUsage"),
                 ),
               },
             ]);
-            perfTable.push(...gcRows);
+            perfTable.push(...memRows);
+          }
+
+          if (
+            metrics.memoryMetrics.garbageMetrics &&
+            metrics.memoryMetrics.garbageMetrics.length > 0
+          ) {
+            const gcRows: any[] = [];
+            metrics.memoryMetrics.garbageMetrics
+              .sort(
+                (a, b) =>
+                  Number(b.garbageCollected) - Number(a.garbageCollected),
+              )
+              .forEach((metric) => {
+                const originalType = metric.type;
+                const pascalCaseType = originalType.replace(
+                  /[^a-zA-Z0-9]/g,
+                  "",
+                );
+                const typeKey = `performanceMetrics.gcType.${pascalCaseType}`;
+                const translatedType = this.t.t(typeKey);
+
+                let displayType: string;
+                if (translatedType !== typeKey) {
+                  // Translation found
+                  if (this.t.getLanguage() === "zh") {
+                    displayType = `${translatedType} (${originalType})`;
+                  } else {
+                    displayType = translatedType;
+                  }
+                } else {
+                  // No translation, fallback to original
+                  displayType = originalType;
+                }
+
+                gcRows.push([
+                  `  ${displayType}`,
+                  chalk.magenta(formatBytes(metric.garbageCollected)),
+                ]);
+              });
+            if (gcRows.length > 0) {
+              perfTable.push([
+                {
+                  colSpan: 2,
+                  content: chalk.bold.white(
+                    this.t.t("performanceMetrics.gcByType"),
+                  ),
+                },
+              ]);
+              perfTable.push(...gcRows);
+            }
           }
         }
+        console.log(perfTable.toString());
       }
-      console.log(perfTable.toString());
     }
 
     // --- Artifact Metrics ---
@@ -677,7 +689,7 @@ export class TerminalReporter {
             ? chalk.green("PASSED")
             : chalk.red(TestStatus[summary.overallStatus]);
         table.push([
-          summary.label,
+          summary.label!,
           status,
           summary.totalRunCount,
           chalk.green(summary.passed?.length || 0),

@@ -1,6 +1,6 @@
 import { ReportData, Action } from "../types";
 import { Translator } from "../i18n/translator";
-import { ActionCacheStatistics_MissReason } from "../proto/generated/src/main/protobuf/action_cache";
+import { actionCacheStatistics_MissReasonToJSON } from "../proto/generated/src/main/protobuf/action_cache";
 
 // Helper class for building Markdown content
 class MarkdownBuilder {
@@ -258,7 +258,7 @@ class MarkdownBuilder {
         .filter((d) => (d.count ?? 0) > 0)
         .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
         .forEach((d) => {
-          const reasonString = ActionCacheStatistics_MissReason[d.reason!];
+          const reasonString = actionCacheStatistics_MissReasonToJSON(d.reason);
           const pascalCaseReason = reasonString
             .replace(/_/g, " ")
             .toLowerCase()

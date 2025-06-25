@@ -14,16 +14,18 @@ import {
   NamedSetOfFiles,
   ConvenienceSymlinksIdentified,
   Aborted,
+  File as ProtoFile,
 } from "./proto/generated/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream";
 import { CommandLine } from "./proto/generated/src/main/protobuf/command_line";
 
 // Extended types for processing
 export interface Action extends ProtoActionExecuted {
-  label?: string;
+  // Overwrite the label to be optional since we add it during processing
   strategy?: string;
   mnemonic?: string;
   argv?: string[];
   stderrContent?: string;
+  // This is a simplified version for our needs
   actionResult?: {
     executionInfo: { startTimeMillis: string; wallTimeMillis: string };
   };
@@ -34,6 +36,7 @@ export interface TestSummary extends ProtoTestSummary {
 }
 
 export interface BuildEvent extends ProtoBuildEvent {
+  // `payload` is used as a fallback for older BEP formats.
   payload?: any;
 }
 
@@ -52,6 +55,7 @@ export {
   NamedSetOfFiles,
   ConvenienceSymlinksIdentified,
   Aborted,
+  ProtoFile as File,
 };
 
 // A structured object containing all processed data for reporting.
