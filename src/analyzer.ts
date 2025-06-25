@@ -3,7 +3,7 @@ import * as readline from "readline";
 import { fileURLToPath } from "url";
 import chalk from "chalk";
 import {
-  BepEvent,
+  BuildEvent,
   Action,
   TestSummary,
   BuildFinished,
@@ -77,7 +77,7 @@ export class StaticBepAnalyzer {
     for await (const line of rl) {
       try {
         if (line.trim() === "") continue;
-        const event: BepEvent = JSON.parse(line);
+        const event: BuildEvent = JSON.parse(line);
         this.processEvent(event);
       } catch (e) {
         console.warn(
@@ -93,7 +93,7 @@ export class StaticBepAnalyzer {
     }
   }
 
-  protected processEvent(event: BepEvent): void {
+  protected processEvent(event: BuildEvent): void {
     const id = event.id;
     const data = event.payload || event;
 

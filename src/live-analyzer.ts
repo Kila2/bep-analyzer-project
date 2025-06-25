@@ -3,7 +3,7 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import { Tail } from "tail";
 import logUpdate from "log-update";
-import { BepEvent } from "./types";
+import { BuildEvent } from "./types";
 import { StaticBepAnalyzer } from "./analyzer";
 
 function formatDuration(ms: number): string {
@@ -131,7 +131,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
       tail.on("line", (line: string) => {
         try {
           if (line.trim() === "") return;
-          const event: BepEvent = JSON.parse(line);
+          const event: BuildEvent = JSON.parse(line);
           this.processEvent(event);
         } catch (e) {}
       });
@@ -170,7 +170,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     }
   }
 
-  protected processEvent(event: BepEvent): void {
+  protected processEvent(event: BuildEvent): void {
     super.processEvent(event);
 
     const id = event.id;

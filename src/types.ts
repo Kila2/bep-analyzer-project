@@ -1,4 +1,4 @@
-export interface BepEvent {
+export interface BuildEvent {
   id: {
     // Standard keys from common BEP format
     buildStarted?: any;
