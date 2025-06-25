@@ -1,7 +1,13 @@
 import chalk from "chalk";
 import Table from "cli-table3";
-import { ReportData, Action } from "../types";
+import { ReportData, Action, TestSummary } from "../types";
 import { Translator } from "../i18n/translator";
+import { ActionCacheStatistics_MissReason } from "../proto/generated/src/main/protobuf/action_cache";
+import {
+  TestStatus,
+  ConvenienceSymlink,
+  ConvenienceSymlink_Action,
+} from "../proto/generated/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) {
@@ -202,7 +208,7 @@ export class TerminalReporter {
     }
 
     // --- Performance Metrics ---
-    if (buildMetrics) {
+    if (buildMetrics?.actionSummary) {
       console.log(
         chalk.bold.cyan(`\n--- ${this.t.t("performanceMetrics.title")} ---`),
       );
@@ -222,15 +228,15 @@ export class TerminalReporter {
         [
           this.t.t("performanceMetrics.actionsCreated"),
           chalk.blue(
-            formatNumber(metrics.actionSummary.actionsCreated || "N/A"),
+            formatNumber(metrics.actionSummary?.actionsCreated || "N/A"),
           ),
         ],
         [
           this.t.t("performanceMetrics.actionsExecuted"),
-          chalk.blue(formatNumber(metrics.actionSummary.actionsExecuted)),
+          chalk.blue(formatNumber(metrics.actionSummary?.actionsExecuted || 0)),
         ],
       );
-      if (metrics.actionSummary.actionCacheStatistics) {
+      if (metrics.actionSummary?.actionCacheStatistics) {
         const stats = metrics.actionSummary.actionCacheStatistics;
         const misses = stats.missDetails.reduce(
           (s, d) => s + (Number(d.count) || 0),
@@ -269,13 +275,15 @@ export class TerminalReporter {
             missRows
               .filter((detail) => detail.reason != undefined)
               .forEach((detail) => {
-                const pascalCaseReason = detail
-                  .reason!.replace(/_/g, " ")
+                const reasonString =
+                  ActionCacheStatistics_MissReason[detail.reason!];
+                const pascalCaseReason = reasonString
+                  .replace(/_/g, " ")
                   .toLowerCase()
-                  .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase())
+                  .replace(/(?:^|\s)\S/g, (a: string) => a.toUpperCase())
                   .replace(/\s/g, "");
                 const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
-                const reason = this.t.t(reasonKey, { reason: detail.reason! });
+                const reason = this.t.t(reasonKey, { reason: reasonString });
                 perfTable.push([
                   `    - ${reason}`,
                   chalk.yellow(formatNumber(detail.count ?? 0)),
@@ -378,16 +386,20 @@ export class TerminalReporter {
         ],
         style: { head: ["cyan"] },
       });
-      artifactTable.push([
-        this.t.t("artifactMetrics.sourceRead"),
-        formatNumber(sourceArtifactsRead.count),
-        formatBytes(sourceArtifactsRead.sizeInBytes),
-      ]);
-      artifactTable.push([
-        this.t.t("artifactMetrics.outputSeen"),
-        formatNumber(outputArtifactsSeen.count),
-        formatBytes(outputArtifactsSeen.sizeInBytes),
-      ]);
+      if (sourceArtifactsRead) {
+        artifactTable.push([
+          this.t.t("artifactMetrics.sourceRead"),
+          formatNumber(sourceArtifactsRead.count),
+          formatBytes(sourceArtifactsRead.sizeInBytes),
+        ]);
+      }
+      if (outputArtifactsSeen) {
+        artifactTable.push([
+          this.t.t("artifactMetrics.outputSeen"),
+          formatNumber(outputArtifactsSeen.count),
+          formatBytes(outputArtifactsSeen.sizeInBytes),
+        ]);
+      }
       if (topLevelArtifacts)
         artifactTable.push([
           this.t.t("artifactMetrics.topLevel"),
@@ -484,7 +496,7 @@ export class TerminalReporter {
       buildToolLogs.log.forEach((log) => {
         if (log.contents) {
           try {
-            const decoded = Buffer.from(log.contents, "base64").toString(
+            const decoded = Buffer.from(log.contents as any, "base64").toString(
               "utf-8",
             );
             if (log.name === "critical path") {
@@ -516,7 +528,7 @@ export class TerminalReporter {
           `\n--- ${this.t.t("problemsFailures.problemsTitle")} ---`,
         ),
       );
-      problems.forEach((p) => console.log(chalk.red(`- ${p.message}`)));
+      problems.forEach((p) => console.log(chalk.red(`- ${p.description}`)));
     }
 
     if (failedTargets.length > 0) {
@@ -634,7 +646,7 @@ export class TerminalReporter {
                   action.stderrContent
                     .trim()
                     .split("\n")
-                    .map((line) => `      ${line}`)
+                    .map((line: string) => `      ${line}`)
                     .join("\n"),
                 ),
               );
@@ -661,9 +673,9 @@ export class TerminalReporter {
       });
       testSummaries.forEach((summary) => {
         const status =
-          summary.overallStatus === "PASSED"
-            ? chalk.green(summary.overallStatus)
-            : chalk.red(summary.overallStatus);
+          summary.overallStatus === TestStatus.PASSED
+            ? chalk.green("PASSED")
+            : chalk.red(TestStatus[summary.overallStatus]);
         table.push([
           summary.label,
           status,
@@ -720,7 +732,7 @@ export class TerminalReporter {
           ),
           action.mnemonic,
           action.strategy || "N/A",
-          action.primaryOutput?.uri.replace("file://", "") ||
+          action.primaryOutput?.uri?.replace("file://", "") ||
             action.label ||
             "N/A",
         ]);
@@ -746,7 +758,10 @@ export class TerminalReporter {
     }
 
     // --- Convenience Symlinks ---
-    if (convenienceSymlinks.length > 0) {
+    const allSymlinks = convenienceSymlinks.flatMap(
+      (identified) => identified.convenienceSymlinks || [],
+    );
+    if (allSymlinks.length > 0) {
       console.log(
         chalk.bold.cyan(`\n--- ${this.t.t("convenienceSymlinks.title")} ---`),
       );
@@ -758,11 +773,11 @@ export class TerminalReporter {
         ],
         style: { head: ["cyan"] },
       });
-      convenienceSymlinks.forEach((link) => {
+      allSymlinks.forEach((link: ConvenienceSymlink) => {
         const action =
-          link.action === "CREATE"
-            ? chalk.green(link.action)
-            : chalk.red(link.action);
+          link.action === ConvenienceSymlink_Action.CREATE
+            ? chalk.green("CREATE")
+            : chalk.red("DELETE");
         symlinksTable.push([link.path, action, link.target || ""]);
       });
       console.log(symlinksTable.toString());

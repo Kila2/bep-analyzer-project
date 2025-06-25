@@ -3,7 +3,7 @@ import * as readline from "readline";
 import { fileURLToPath } from "url";
 import chalk from "chalk";
 import {
-  ActionExecuted,
+  Action,
   BuildEvent,
   BuildStarted,
   BuildFinished,
@@ -18,6 +18,9 @@ import {
   UnstructuredCommandLine,
   NamedSetOfFiles,
   ConvenienceSymlinksIdentified,
+  ReportData,
+  Aborted,
+  File,
 } from "./types";
 
 function stripAnsi(str: string): string {
@@ -41,7 +44,7 @@ export class StaticBepAnalyzer {
   protected buildFinished: BuildFinished | null = null;
   protected buildMetrics: BuildMetrics | null = null;
   protected buildToolLogs: BuildToolLogs | null = null;
-  protected readonly actions: ActionExecuted[] = [];
+  protected readonly actions: Action[] = [];
   protected readonly testSummaries: TestSummary[] = [];
   protected readonly failedTargets: { label: string; configId?: string }[] = [];
   protected workspaceStatus: WorkspaceStatus | null = null;
@@ -54,6 +57,7 @@ export class StaticBepAnalyzer {
   private readonly topLevelOutputSets: Map<string, string[]> = new Map();
   private readonly progressStderrCache: Map<string, string> = new Map();
   private readonly actionStrategyCache: Map<string, string> = new Map();
+  protected readonly problems: Aborted[] = [];
 
   constructor(
     protected actionDetails: "none" | "failed" | "all" = "failed",
@@ -95,15 +99,21 @@ export class StaticBepAnalyzer {
     const id = event.id;
     const data = event.payload || event;
 
-    if (id.buildStarted || id.started) {
-      if (data.started) this.buildStarted = data.started;
+    if (data.started) {
+      this.buildStarted = data.started;
       return;
     }
 
-    if (id.buildFinished || id.finished) {
-      if (data.finished) this.buildFinished = data.finished;
+    if (data.finished) {
+      this.buildFinished = data.finished;
       return;
     }
+
+    if (data.aborted) {
+      this.problems.push(data.aborted);
+    }
+
+    if (!id) return;
 
     if (id.progress && (data.progress?.stderr || data.progress?.stdout)) {
       const fullStderr = data.progress.stderr || data.progress.stdout || "";
@@ -153,12 +163,16 @@ export class StaticBepAnalyzer {
       case "actionCompleted":
         const actionData = data.completed || data.action;
         if (actionData) {
-          const action = actionData as ActionExecuted;
+          const action = actionData as Action;
           action.label =
             id.actionCompleted!.label || id.actionCompleted!.primaryOutput;
           if (id.actionCompleted!.primaryOutput) {
             action.primaryOutput = {
               uri: `file://${id.actionCompleted!.primaryOutput}`,
+              name: getFileStem(id.actionCompleted!.primaryOutput),
+              pathPrefix: [],
+              digest: "",
+              length: "0",
             };
           }
 
@@ -239,7 +253,7 @@ export class StaticBepAnalyzer {
         }
         break;
       case "targetCompleted":
-        const completedData = data.completed as BuildEventId_TargetCompletedId;
+        const completedData = data.completed;
         if (completedData) {
           if (!completedData.success) {
             this.failedTargets.push({
@@ -314,10 +328,10 @@ export class StaticBepAnalyzer {
     }
   }
 
-  private resolveFileSet(fileSetId: string): { name: string; uri: string }[] {
+  private resolveFileSet(fileSetId: string): File[] {
     const seen = new Set<string>();
     const queue = [fileSetId];
-    const result: { name: string; uri: string }[] = [];
+    const result: File[] = [];
 
     while (queue.length > 0) {
       const currentId = queue.shift()!;
@@ -363,6 +377,7 @@ export class StaticBepAnalyzer {
       resolvedOutputs: resolvedOutputs,
       convenienceSymlinks: this.convenienceSymlinks,
       actionDetails: this.actionDetails,
+      problems: this.problems,
     };
   }
 }

@@ -2,6 +2,7 @@ import { ReportData, Action } from "../types";
 import { Translator } from "../i18n/translator";
 import AnsiToHtml from "ansi-to-html";
 import { marked } from "marked";
+import { ActionCacheStatistics_MissReason } from "../proto/generated/src/main/protobuf/action_cache";
 
 export class HtmlReporter {
   private ansiConverter: AnsiToHtml;
@@ -171,7 +172,7 @@ export class HtmlReporter {
     html += renderSection("buildEnv.title", "environment", envContent);
 
     // Performance
-    if (buildMetrics) {
+    if (buildMetrics?.actionSummary) {
       let perfContent = "";
       let mainPerfMd = `| Metric | Value |\n|---|---|\n`;
       mainPerfMd += `| ${this.t.t("performanceMetrics.actionsCreated")} | ${this.formatNumber(buildMetrics.actionSummary.actionsCreated || "N/A")} |\n`;
@@ -207,13 +208,14 @@ export class HtmlReporter {
             .sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
 
         missDetails.forEach((d) => {
-          const pascalCaseReason = d
-            .reason!.replace(/_/g, " ")
+          const reasonString = ActionCacheStatistics_MissReason[d.reason!];
+          const pascalCaseReason = reasonString
+            .replace(/_/g, " ")
             .toLowerCase()
-            .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase())
+            .replace(/(?:^|\s)\S/g, (a: string) => a.toUpperCase())
             .replace(/\s/g, "");
           const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
-          const reason = this.t.t(reasonKey, { reason: d.reason! });
+          const reason = this.t.t(reasonKey, { reason: reasonString });
           missMd += `| ${reason} | ${this.formatNumber(d.count ?? 0)} |\n`;
         });
         perfContent += `<details open><summary>${this.t.t("performanceMetrics.cacheMissBreakdown")}</summary><div>
@@ -261,8 +263,12 @@ export class HtmlReporter {
       let artifactMd = `| ${this.t.t("artifactMetrics.metric")} | ${this.t.t("artifactMetrics.count")} | ${this.t.t("artifactMetrics.size")} |\n|---|---|---|\n`;
       const { sourceArtifactsRead, outputArtifactsSeen, topLevelArtifacts } =
         buildMetrics.artifactMetrics;
-      artifactMd += `| ${this.t.t("artifactMetrics.sourceRead")} | ${this.formatNumber(sourceArtifactsRead.count)} | ${this.formatBytes(sourceArtifactsRead.sizeInBytes)} |\n`;
-      artifactMd += `| ${this.t.t("artifactMetrics.outputSeen")} | ${this.formatNumber(outputArtifactsSeen.count)} | ${this.formatBytes(outputArtifactsSeen.sizeInBytes)} |\n`;
+      if (sourceArtifactsRead) {
+        artifactMd += `| ${this.t.t("artifactMetrics.sourceRead")} | ${this.formatNumber(sourceArtifactsRead.count)} | ${this.formatBytes(sourceArtifactsRead.sizeInBytes)} |\n`;
+      }
+      if (outputArtifactsSeen) {
+        artifactMd += `| ${this.t.t("artifactMetrics.outputSeen")} | ${this.formatNumber(outputArtifactsSeen.count)} | ${this.formatBytes(outputArtifactsSeen.sizeInBytes)} |\n`;
+      }
       if (topLevelArtifacts)
         artifactMd += `| ${this.t.t("artifactMetrics.topLevel")} | ${this.formatNumber(topLevelArtifacts.count)} | ${this.formatBytes(topLevelArtifacts.sizeInBytes)} |\n`;
       html += renderSection(

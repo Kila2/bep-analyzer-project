@@ -1,5 +1,6 @@
 import { ReportData, Action } from "../types";
 import { Translator } from "../i18n/translator";
+import { ActionCacheStatistics_MissReason } from "../proto/generated/src/main/protobuf/action_cache";
 
 // Helper class for building Markdown content
 class MarkdownBuilder {
@@ -49,7 +50,9 @@ class MarkdownBuilder {
 
   private mdCode(text: string | undefined | null): string {
     if (text === null || text === undefined) return "`N/A`";
-    return `\`${String(text).replace(/`/g, "\\`")}\``;
+    // Replace backticks with single quotes to avoid breaking markdown code spans.
+    const cleanedText = String(text).replace(/`/g, "'");
+    return `\`${cleanedText}\``;
   }
 
   constructor(
@@ -208,7 +211,7 @@ class MarkdownBuilder {
 
   private buildPerformance(): void {
     const { buildMetrics } = this.data;
-    if (!buildMetrics) return;
+    if (!buildMetrics?.actionSummary) return;
 
     this.h2("performanceMetrics.title");
     this.a("| Metric | Value |");
@@ -255,13 +258,14 @@ class MarkdownBuilder {
         .filter((d) => (d.count ?? 0) > 0)
         .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
         .forEach((d) => {
-          const pascalCaseReason = d
-            .reason!.replace(/_/g, " ")
+          const reasonString = ActionCacheStatistics_MissReason[d.reason!];
+          const pascalCaseReason = reasonString
+            .replace(/_/g, " ")
             .toLowerCase()
-            .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase())
+            .replace(/(?:^|\s)\S/g, (a: string) => a.toUpperCase())
             .replace(/\s/g, "");
           const reasonKey = `performanceMetrics.cacheMissReason.${pascalCaseReason}`;
-          const reason = this.t.t(reasonKey, { reason: d.reason! });
+          const reason = this.t.t(reasonKey, { reason: reasonString });
           this.a(`| ${reason} | ${this.formatNumber(d.count ?? 0)} |`);
         });
       this.a();
@@ -300,12 +304,16 @@ class MarkdownBuilder {
       `| ${this.t.t("artifactMetrics.metric")} | ${this.t.t("artifactMetrics.count")} | ${this.t.t("artifactMetrics.size")} |`,
     );
     this.a("|---|---|---|");
-    this.a(
-      `| ${this.t.t("artifactMetrics.sourceRead")} | ${this.formatNumber(sourceArtifactsRead.count)} | ${this.formatBytes(sourceArtifactsRead.sizeInBytes)} |`,
-    );
-    this.a(
-      `| ${this.t.t("artifactMetrics.outputSeen")} | ${this.formatNumber(outputArtifactsSeen.count)} | ${this.formatBytes(outputArtifactsSeen.sizeInBytes)} |`,
-    );
+    if (sourceArtifactsRead) {
+      this.a(
+        `| ${this.t.t("artifactMetrics.sourceRead")} | ${this.formatNumber(sourceArtifactsRead.count)} | ${this.formatBytes(sourceArtifactsRead.sizeInBytes)} |`,
+      );
+    }
+    if (outputArtifactsSeen) {
+      this.a(
+        `| ${this.t.t("artifactMetrics.outputSeen")} | ${this.formatNumber(outputArtifactsSeen.count)} | ${this.formatBytes(outputArtifactsSeen.sizeInBytes)} |`,
+      );
+    }
     if (topLevelArtifacts)
       this.a(
         `| ${this.t.t("artifactMetrics.topLevel")} | ${this.formatNumber(topLevelArtifacts.count)} | ${this.formatBytes(topLevelArtifacts.sizeInBytes)} |`,
@@ -404,7 +412,7 @@ class MarkdownBuilder {
       .slice(0, 10)
       .forEach((action) => {
         const output =
-          action.primaryOutput?.uri.replace("file://", "") || action.label;
+          action.primaryOutput?.uri?.replace("file://", "") || action.label;
         this.a(
           `| ${this.formatDuration(parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10))} | ${this.mdCode(action.mnemonic)} | ${this.mdCode(action.strategy || "N/A")} | ${this.mdCode(output)} |`,
         );
@@ -417,7 +425,9 @@ class MarkdownBuilder {
     if (problems.length === 0 && failedTargets.length === 0) return;
 
     this.h2("problemsFailures.problemsTitle");
-    problems.forEach((p) => this.a(`- **Error**: ${this.mdCode(p.message)}`));
+    problems.forEach((p) =>
+      this.a(`- **Error**: ${this.mdCode(p.description)}`),
+    );
     failedTargets.forEach((target) => {
       const config = target.configId
         ? configurations.get(target.configId)
@@ -462,7 +472,7 @@ class MarkdownBuilder {
         parseInt(action.actionResult?.executionInfo.wallTimeMillis || "0", 10),
       );
       const primaryOutput =
-        action.primaryOutput?.uri.replace("file://", "") ||
+        action.primaryOutput?.uri?.replace("file://", "") ||
         action.label ||
         "N/A";
 
@@ -478,8 +488,9 @@ class MarkdownBuilder {
       if (action.argv && action.argv.length > 0) {
         this.a(`<details>`);
         this.a(
-          `  <summary><strong>${this.t.t("actionDetails.commandLine")}</strong></summary>\n`,
+          `  <summary><strong>${this.t.t("actionDetails.commandLine")}</strong></summary>`,
         );
+        this.a();
         this.a("```sh");
         this.a(action.argv.join(" "));
         this.a("```");
@@ -488,8 +499,9 @@ class MarkdownBuilder {
       if (action.stderrContent && action.stderrContent.trim()) {
         this.a(`<details>`);
         this.a(
-          `  <summary><strong>${this.t.t("actionDetails.stderr")}</strong></summary>\n`,
+          `  <summary><strong>${this.t.t("actionDetails.stderr")}</strong></summary>`,
         );
+        this.a();
         this.a("```");
         this.a(action.stderrContent.trim());
         this.a("```");

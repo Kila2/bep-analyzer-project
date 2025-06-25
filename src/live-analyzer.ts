@@ -176,14 +176,14 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
     const id = event.id;
     const data = event.payload || event;
 
-    if (id.buildStarted || id.started) {
+    if (id?.started) {
       if (!this.timer) this.startTimer();
       if (this.displayMode === "vscode-log" && data.started) {
         console.log(
           `🚀 [START] Build started. Command: ${data.started.command}\n---`,
         );
       }
-    } else if (id.actionCompleted) {
+    } else if (id?.actionCompleted) {
       const lastAction = this.actions[this.actions.length - 1];
       if (lastAction && this.displayMode === "vscode-log") {
         const mnemonic = lastAction.mnemonic || lastAction.type;
@@ -231,15 +231,15 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           );
         }
       }
-    } else if (id.problem) {
-      if (this.displayMode === "vscode-log" && data.problem) {
-        console.log(`[PROBLEM] 🛑 ${data.problem.message.trim()}\n---`);
+    } else if (data.aborted) {
+      if (this.displayMode === "vscode-log") {
+        console.log(`[PROBLEM] 🛑 ${data.aborted.description.trim()}\n---`);
       }
-      if (this.displayMode === "dashboard" && data.problem) {
-        const problemMsg = `Problem: ${data.problem.message.split("\n")[0]}`;
+      if (this.displayMode === "dashboard") {
+        const problemMsg = `Problem: ${data.aborted.description.split("\n")[0]}`;
         this.addRecentLog(chalk.red(problemMsg));
       }
-    } else if (id.progress) {
+    } else if (id?.progress) {
       this.progressText = data.progress?.stderr || data.progress?.stdout || "";
       const parsed = parseProgress(this.progressText);
 
@@ -258,7 +258,7 @@ export class LiveBepAnalyzer extends StaticBepAnalyzer {
           if (stripAnsi(log).trim()) this.addRecentLog(`  ${log}`);
         });
       }
-    } else if (id.buildFinished || id.finished) {
+    } else if (id?.buildFinished) {
       this.isFinished = true;
       if (this.displayMode === "vscode-log" && data.finished) {
         const finishTime = parseInt(data.finished.finishTimeMillis, 10);
