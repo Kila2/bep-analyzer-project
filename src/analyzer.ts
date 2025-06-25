@@ -3,22 +3,21 @@ import * as readline from "readline";
 import { fileURLToPath } from "url";
 import chalk from "chalk";
 import {
+  ActionExecuted,
   BuildEvent,
-  Action,
-  TestSummary,
-  BuildFinished,
   BuildStarted,
-  Problem,
-  WorkspaceStatus,
-  Configuration,
-  BuildMetrics,
+  BuildFinished,
   BuildToolLogs,
+  BuildMetrics,
+  Configuration,
   OptionsParsed,
-  StructuredCommandLine,
+  TestSummary,
+  WorkspaceStatus,
+  BuildEventId_TargetCompletedId,
+  CommandLine,
+  UnstructuredCommandLine,
   NamedSetOfFiles,
-  ConvenienceSymlink,
-  TargetCompleted,
-  ReportData,
+  ConvenienceSymlinksIdentified,
 } from "./types";
 
 function stripAnsi(str: string): string {
@@ -42,17 +41,16 @@ export class StaticBepAnalyzer {
   protected buildFinished: BuildFinished | null = null;
   protected buildMetrics: BuildMetrics | null = null;
   protected buildToolLogs: BuildToolLogs | null = null;
-  protected readonly actions: Action[] = [];
+  protected readonly actions: ActionExecuted[] = [];
   protected readonly testSummaries: TestSummary[] = [];
-  protected readonly problems: Problem[] = [];
   protected readonly failedTargets: { label: string; configId?: string }[] = [];
   protected workspaceStatus: WorkspaceStatus | null = null;
   protected readonly configurations: Map<string, Configuration> = new Map();
   protected optionsParsed: OptionsParsed | null = null;
-  protected structuredCommandLine: StructuredCommandLine | null = null;
+  protected structuredCommandLine: CommandLine | null = null;
   protected buildPatterns: string[] = [];
   private readonly namedSets: Map<string, NamedSetOfFiles> = new Map();
-  private readonly convenienceSymlinks: ConvenienceSymlink[] = [];
+  private readonly convenienceSymlinks: ConvenienceSymlinksIdentified[] = [];
   private readonly topLevelOutputSets: Map<string, string[]> = new Map();
   private readonly progressStderrCache: Map<string, string> = new Map();
   private readonly actionStrategyCache: Map<string, string> = new Map();
@@ -155,7 +153,7 @@ export class StaticBepAnalyzer {
       case "actionCompleted":
         const actionData = data.completed || data.action;
         if (actionData) {
-          const action = actionData as Action;
+          const action = actionData as ActionExecuted;
           action.label =
             id.actionCompleted!.label || id.actionCompleted!.primaryOutput;
           if (id.actionCompleted!.primaryOutput) {
@@ -240,11 +238,8 @@ export class StaticBepAnalyzer {
           else this.testSummaries.push(summary);
         }
         break;
-      case "problem":
-        if (data.problem) this.problems.push(data.problem as Problem);
-        break;
       case "targetCompleted":
-        const completedData = data.completed as TargetCompleted;
+        const completedData = data.completed as BuildEventId_TargetCompletedId;
         if (completedData) {
           if (!completedData.success) {
             this.failedTargets.push({
@@ -359,7 +354,6 @@ export class StaticBepAnalyzer {
       buildToolLogs: this.buildToolLogs,
       actions: this.actions,
       testSummaries: this.testSummaries,
-      problems: this.problems,
       failedTargets: this.failedTargets,
       workspaceStatus: this.workspaceStatus,
       configurations: this.configurations,
