@@ -19,10 +19,16 @@ yargs(hideBin(process.argv))
     (yargs) => {
       return yargs
         .positional("file", {
-          describe: "Path to the build_event.json file",
+          describe: "Path to the build_event.json or build_event.pb file",
           type: "string",
           normalize: true,
           demandOption: true,
+        })
+        .option("format", {
+          type: "string",
+          description: "Format of the input file.",
+          choices: ["json", "pb"],
+          default: "json",
         })
         .option("watch", {
           alias: "l", // for "live"
@@ -78,11 +84,21 @@ yargs(hideBin(process.argv))
       const wideLevel = argv.w as number;
       const lang = argv.lang as "en" | "zh";
       const translator = new Translator(lang);
+      const format = argv.format as "json" | "pb";
 
       const isLive =
         argv.watch || argv.outputVscodeLog || argv.outputVscodeStatus;
 
       if (isLive) {
+        if (format === "pb") {
+          console.error(
+            chalk.red(
+              "Error: Watch mode is not supported for binary protobuf (.pb) format.",
+            ),
+          );
+          process.exit(1);
+        }
+
         let displayMode: LiveDisplayMode = "dashboard";
         if (argv.outputVscodeLog) {
           displayMode = "vscode-log";
@@ -151,9 +167,13 @@ yargs(hideBin(process.argv))
           process.exit(1);
         }
       } else {
-        console.log(chalk.blue(`Analyzing completed file: ${filePath}`));
+        console.log(
+          chalk.blue(
+            `Analyzing completed file: ${filePath} (format: ${format})`,
+          ),
+        );
         const analyzer = new StaticBepAnalyzer(actionDetails, wideLevel);
-        await analyzer.analyze(filePath);
+        await analyzer.analyze(filePath, format);
         const reportData = analyzer.getReportData();
 
         // Generate all requested reports

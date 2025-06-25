@@ -1,6 +1,6 @@
 {
   "name": "bep-analyzer",
-  "version": "1.7.3",
+  "version": "1.8.0",
   "description": "A tool to analyze Bazel BEP files, with static/live modes and markdown/html report generation.",
   "main": "dist/index.js",
   "bin": {
@@ -13,7 +13,7 @@
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "proto:sync": "node scripts/sync-protos.js",
-    "proto:gen-ts": "protoc --plugin=protoc-gen-ts_proto=$(pwd)/node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=src/proto/generated --ts_proto_opt=esModuleInterop=true,forceLong=string,outputServices=false,snakeToCamel=true -I proto $(find proto -type f -name '*.proto')"
+    "proto:gen-ts": "protoc --plugin=protoc-gen-ts_proto=$(pwd)/node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=src/proto/generated --ts_proto_opt=esModuleInterop=true,forceLong=string,outputServices=false,snakeToCamel=true,useProtoFiles=true -I proto $(find proto -type f -name '*.proto')"
   },
   "keywords": [
     "bazel",
@@ -35,6 +35,7 @@
     "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@bufbuild/protobuf": "^2.5.2",
     "@types/marked": "^5.0.2",
     "@types/node": "^20.8.4",
     "@types/tail": "^2.2.1",

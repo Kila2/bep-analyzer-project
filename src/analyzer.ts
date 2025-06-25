@@ -22,7 +22,11 @@ import {
   Aborted,
   File,
 } from "./types";
-import { OutputGroup } from "./proto/generated/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream";
+import {
+  OutputGroup,
+  BuildEvent as BuildEventProto,
+} from "./proto/generated/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream";
+import { BinaryReader } from "@bufbuild/protobuf/wire";
 
 function stripAnsi(str: string): string {
   // This helper is used locally for filtering logic, not for the final output
@@ -65,12 +69,20 @@ export class StaticBepAnalyzer {
     protected wideLevel: number = 0,
   ) {}
 
-  public async analyze(filePath: string) {
+  public async analyze(filePath: string, format: "json" | "pb" = "json") {
     if (!fs.existsSync(filePath)) {
       console.error(chalk.red(`Error: File not found at ${filePath}`));
       process.exit(1);
     }
 
+    if (format === "pb") {
+      await this.analyzePb(filePath);
+    } else {
+      await this.analyzeJson(filePath);
+    }
+  }
+
+  private async analyzeJson(filePath: string) {
     const fileStream = fs.createReadStream(filePath);
     const rl = readline.createInterface({
       input: fileStream,
@@ -92,6 +104,31 @@ export class StaticBepAnalyzer {
           ),
         );
         if (e instanceof Error) console.warn(chalk.gray(e.message));
+      }
+    }
+  }
+
+  private async analyzePb(filePath: string) {
+    const fileBuffer = fs.readFileSync(filePath);
+    const reader = new BinaryReader(fileBuffer);
+
+    while (reader.pos < reader.len) {
+      try {
+        const varintLen = reader.uint32();
+        const messageEnd = reader.pos + varintLen;
+        // Use a slice of the original buffer to decode the message
+        const message = BuildEventProto.decode(
+          fileBuffer.subarray(reader.pos, messageEnd),
+        );
+        this.processEvent(message as BuildEvent);
+        reader.pos = messageEnd;
+      } catch (e) {
+        console.warn(
+          chalk.yellow(`Warning: Could not parse or process protobuf message.`),
+        );
+        if (e instanceof Error) console.warn(chalk.gray(e.message));
+        // Attempt to recover by breaking the loop. A more robust implementation might try to resync.
+        break;
       }
     }
   }
